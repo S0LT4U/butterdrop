@@ -28,6 +28,8 @@ let outputGain = null;
 let feederNode = null; // ScriptProcessor fallback
 let audioEl = null; // native <audio> streaming /stream.wav (primary path)
 let audioMode = 'media';
+let keepAwake = null; // hidden <video>: audio-only playback doesn't stop the
+// Android TV screensaver — unmuted video+audio playback does.
 let soundOn = params.get('sound') !== '0';
 let ws = null;
 let started = false;
@@ -141,6 +143,32 @@ function nextPreset() {
 
 function prevPreset() {
   loadPresetAt(presetIndex - 1);
+}
+
+// Route sound through a hidden <video> that also carries a low-fps feed of
+// the visualizer canvas. Android TV starts its screensaver over audio-only
+// pages; genuine unmuted video+audio playback keeps the screen awake.
+function enableKeepAwake() {
+  try {
+    const msd = audioCtx.createMediaStreamDestination();
+    outputGain.connect(msd);
+    const stream = new MediaStream([
+      ...canvas.captureStream(2).getVideoTracks(),
+      ...msd.stream.getAudioTracks(),
+    ]);
+    keepAwake = document.createElement('video');
+    keepAwake.setAttribute('playsinline', '');
+    keepAwake.style.cssText =
+      'position:fixed;left:0;bottom:0;width:2px;height:2px;opacity:0.01;pointer-events:none;';
+    keepAwake.srcObject = stream;
+    document.body.appendChild(keepAwake);
+    keepAwake.play();
+    report('keep-awake video active (sound routed through it)');
+  } catch (err) {
+    keepAwake = null;
+    outputGain.connect(audioCtx.destination);
+    report(`keep-awake unavailable, plain audio out: ${err.message}`);
+  }
 }
 
 function setSound(on) {
@@ -287,7 +315,7 @@ async function startInner() {
 
   outputGain = audioCtx.createGain();
   outputGain.gain.value = soundOn ? 1 : 0;
-  outputGain.connect(audioCtx.destination);
+  enableKeepAwake();
 
   // Primary: native <audio> element playing the endless-WAV stream. The
   // browser's media pipeline decodes and clocks it entirely off the main
@@ -361,6 +389,9 @@ async function startInner() {
       if (audioEl.paused || audioEl.error) {
         audioEl.play().catch(() => {});
       }
+    }
+    if (keepAwake && keepAwake.paused) {
+      keepAwake.play().catch(() => {});
     }
     if (ws && ws.readyState === 1) {
       ws.send(
