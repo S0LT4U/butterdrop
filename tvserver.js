@@ -57,14 +57,32 @@ function control(message) {
   }
 }
 
+let streamPending = [];
+let streamPendingBytes = 0;
+
 function broadcast(buffer) {
   for (const ws of clients) {
     if (ws.readyState === ws.OPEN && ws.bufferedAmount < 1_000_000) {
       ws.send(buffer, { binary: true });
     }
   }
-  for (const res of streamClients) {
-    if (res.writableLength < 1_000_000) res.write(Buffer.from(buffer));
+  // Batch WAV-stream writes into ~170ms chunks: a firehose of tiny HTTP
+  // chunks makes weak TV media pipelines hiccup.
+  if (streamClients.size === 0) {
+    streamPending = [];
+    streamPendingBytes = 0;
+    return;
+  }
+  const buf = Buffer.from(buffer);
+  streamPending.push(buf);
+  streamPendingBytes += buf.length;
+  if (streamPendingBytes >= 32768) {
+    const chunk = Buffer.concat(streamPending);
+    streamPending = [];
+    streamPendingBytes = 0;
+    for (const res of streamClients) {
+      if (res.writableLength < 1_000_000) res.write(chunk);
+    }
   }
 }
 

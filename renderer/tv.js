@@ -307,9 +307,10 @@ async function startInner() {
       adaptScale *= 0.72;
       applySize();
     }
-    // Media-path watchdog: restart a stalled element and chase the live
-    // edge. Seeking a live WAV isn't honored everywhere, so catch up by
-    // playing slightly fast (inaudible) until lag is under ~1.5s.
+    // Media-path watchdog: only rescue a stalled element. Do NOT chase the
+    // live edge — seeks and playbackRate nudges stall this pipeline and made
+    // the audio surge in waves. The startup buffer (~5s) is a fixed, stable
+    // latency; leave it alone.
     let lag = 0;
     if (audioMode === 'media' && audioEl) {
       const end = audioEl.buffered.length ? audioEl.buffered.end(audioEl.buffered.length - 1) : 0;
@@ -317,12 +318,6 @@ async function startInner() {
       if (audioEl.paused || audioEl.error) {
         audioEl.play().catch(() => {});
       }
-      if (lag > 3.5) {
-        try {
-          audioEl.currentTime = end - 1;
-        } catch {}
-      }
-      audioEl.playbackRate = lag > 1.5 ? 1.03 : 1.0;
     }
     if (ws && ws.readyState === 1) {
       ws.send(
