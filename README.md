@@ -126,7 +126,7 @@ Edit `config.json` (restart the app to apply):
   "pickerHotkey": "Alt+Shift+V",
   "presetIntervalSeconds": 30,
   "presetBlendSeconds": 2.7,
-  "tvMode": true,
+  "tvMode": false,
   "tvPort": 8720
 }
 ```
