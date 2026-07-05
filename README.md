@@ -1,12 +1,38 @@
 # Butterdrop
 
-Instant fullscreen Milkdrop-style music visualizer for whatever Windows is playing.
-Sits in the system tray; one hotkey toggles a fullscreen [Butterchurn](https://github.com/jberg/butterchurn)
-visualization driven by system audio (WASAPI loopback via Electron's display-media capture).
+Instant fullscreen Milkdrop-style music visualizer for whatever Windows is
+playing — with one-click casting to smart TVs.
 
-## Run
+Butterdrop sits in the system tray. One global hotkey toggles a fullscreen
+[Butterchurn](https://github.com/jberg/butterchurn) (WebGL MilkDrop 2)
+visualization driven by system audio via WASAPI loopback. Flip on TV Mode and
+any browser on your network can run the same visualizer on its own GPU, fed by
+a lightweight audio stream (~190 KB/s — no video encoding). Cast it straight
+to a Chromecast-enabled TV from the tray, and drive everything from your
+phone.
+
+## Features
+
+- **Instant fullscreen visualizer** — global hotkey, opens on whichever
+  monitor your cursor is on, ~370 classic MilkDrop presets, auto-rotating
+  with crossfade blends
+- **Any audio source** — system loopback (everything Windows plays, default)
+  or any input device (mic, line-in, Stereo Mix, USB mixer), switchable live
+- **TV Mode** — serves the visualizer to any device on your LAN; each screen
+  renders on its own GPU with stereo audio playback
+- **One-click casting** — discovers Google Cast devices (Chromecast,
+  Android TV / Google TV) and pushes the visualizer to them from the tray
+- **Phone remote** — next/prev preset, sound on/off, cast/stop-cast from
+  your phone's browser
+- **Tray service** — starts hidden, optional run-at-boot, near-zero idle cost
+
+## Install & run
+
+Requires [Node.js](https://nodejs.org) 18+ on Windows 10/11.
 
 ```
+git clone https://github.com/S0LT4U/butterdrop
+cd butterdrop
 npm install
 npm start
 ```
@@ -24,43 +50,65 @@ The app starts hidden in the system tray (purple/cyan waveform icon).
 | `←` | Previous preset |
 | `S` | Open audio-source picker |
 
-The source picker lets you choose what drives the visuals: **System Audio**
-(WASAPI loopback — everything Windows plays, the default) or any audio input
-device (microphone, line-in, Stereo Mix, USB mixer). Switching is live; the
-choice is remembered across sessions. If a remembered device is unplugged,
-Butterdrop falls back to System Audio.
-
-Presets auto-rotate every 30 seconds with a crossfade blend. The preset name
-shows briefly in the top-left when it changes. The visualizer opens on
-whichever monitor the mouse cursor is on.
+The source picker chooses what drives the visuals: **System Audio** (WASAPI
+loopback — everything Windows plays, the default) or any audio input device.
+Switching is live and remembered across sessions; if a remembered device is
+unplugged, Butterdrop falls back to System Audio.
 
 ## Tray menu
 
-Right-click the tray icon for: Show/Hide Visualizer, Next Preset,
-Select Audio Source, TV Mode, Run at Startup (adds to Windows login
-items), and Quit.
+Right-click the tray icon: Show/Hide Visualizer, Next Preset (drives local
+and TV screens), Select Audio Source, TV Mode, **Cast to…**, Stop Casting,
+Copy TV URL, Copy Phone Remote URL, Run at Startup, Quit.
 
 ## TV Mode
 
-Toggle **TV Mode** in the tray menu and any device on your network can run
-the visualizer in its own browser: smart TV, Chromecast/Fire TV browser,
-tablet, another PC. Use **Copy TV URL** in the tray menu and open that URL
-(e.g. `http://192.168.1.50:8720/?t=abcd1234`) on the device, then tap /
-press OK to start.
+Toggle **TV Mode** in the tray menu. The PC then captures its audio
+continuously (even with the local visualizer hidden) and serves two pages on
+your LAN (default port 8720):
 
-How it works: the PC captures its audio continuously (even with the local
-visualizer hidden) and streams raw samples over WebSocket (~100 KB/s — no
-video encoding). Each connected device renders Butterchurn on its own GPU,
-so many screens can connect at once. The URL token is generated per
-install and required for both the page and the audio stream; the server
-only runs while TV Mode is on. TV Mode survives restarts (it's saved to
-`config.json` as `tvMode`; the port is `tvPort`, default 8720).
+- **TV page** (`Copy TV URL`, e.g. `http://192.168.1.50:8720/?t=abcd1234`) —
+  open it in any browser (smart TV, tablet, another PC), tap/press OK, and
+  that device runs the visualizer fullscreen, in sync with the PC's audio.
+- **Phone remote** (`Copy Phone Remote URL`, `/remote?t=…`) — big buttons
+  for prev/next preset, sound on/off, cast, and stop-cast. Bookmark it to
+  your phone's home screen.
 
-Playing music from your phone? Use Spotify Connect (or similar casting)
-to make this PC the playback device — Butterdrop visualizes whatever the
-PC plays. On the TV page: OK/Enter/click = next preset.
+The audio feed is 48 kHz stereo 16-bit (~190 KB/s per screen — less than a
+Spotify stream). Hi-res outputs (96/192 kHz) are downsampled on the wire.
+Multiple screens can connect at once; each renders independently.
 
-## Config
+**Sound:** every screen plays the audio it receives — mute whichever ones
+you don't want (TV remote, M key on the TV page, phone remote, or PC
+volume). The TV copy runs a fraction of a second behind the PC due to
+network buffering, so pick one place to listen.
+
+Playing music from your phone? Use Spotify Connect (or similar casting) to
+make this PC the playback device — Butterdrop visualizes whatever the PC
+plays, on every connected screen.
+
+URL parameters for the TV page: `autostart=1` skips the tap-to-start splash
+(used when casting), `sound=0` starts muted.
+
+## Casting
+
+Tray → **Cast to…** lists Google Cast devices discovered on your network
+(Chromecast, Android TV / Google TV — e.g. Sony BRAVIA sets). One click:
+
+1. TV Mode starts if it isn't on
+2. The TV's Cast receiver launches DashCast (a community receiver that
+   displays a URL)
+3. The visualizer page loads and autostarts, dancing to the PC's audio
+
+**Stop Casting** from the tray or phone remote ends it (the HOME button on
+the TV remote works too). Cast receiver pages can't see TV remote buttons,
+so use the phone remote or tray to change presets on a casted screen.
+
+The Cast implementation is dependency-free — a minimal Cast v2 protocol
+client (`castclient.js`) speaking hand-encoded protobuf over TLS, with SSDP
+(DIAL) discovery.
+
+## Configuration
 
 Edit `config.json` (restart the app to apply):
 
@@ -69,31 +117,70 @@ Edit `config.json` (restart the app to apply):
   "hotkey": "Control+Alt+V",
   "pickerHotkey": "Alt+Shift+V",
   "presetIntervalSeconds": 30,
-  "presetBlendSeconds": 2.7
+  "presetBlendSeconds": 2.7,
+  "tvMode": true,
+  "tvPort": 8720
 }
 ```
 
-`hotkey` uses [Electron accelerator syntax](https://www.electronjs.org/docs/latest/api/accelerator)
-(e.g. `"Super+Shift+M"`).
+Hotkeys use [Electron accelerator syntax](https://www.electronjs.org/docs/latest/api/accelerator).
+`tvMode` persists automatically when toggled from the tray.
+
+## Run at startup
+
+Tray → **Run at Startup** registers the app in Windows login items, so it's
+waiting in the tray after every boot.
+
+## Security notes
+
+- The TV/remote pages and the audio WebSocket all require a random
+  per-install token in the URL (`?t=…`); requests without it get 403. The
+  server only runs while TV Mode is on, and only serves an allowlisted set
+  of files. Treat the URL as LAN-private — the audio stream is your
+  system audio.
+- The visualizer window is locked down: context isolation, no node
+  integration, navigation and window-opening denied, CSP restricted to
+  local scripts. `unsafe-eval` is required by Butterchurn to compile
+  MilkDrop preset equations — presets come only from the pinned npm
+  packages.
+- `npm audit` is kept at zero known vulnerabilities.
 
 ## How it works
 
-- **main.js** — tray icon, global hotkey, fullscreen frameless window management.
-  A `setDisplayMediaRequestHandler` grants every `getDisplayMedia` call the primary
-  screen with `audio: 'loopback'`, which is Electron's built-in WASAPI system-audio
-  capture — no picker dialog, no virtual audio cable needed.
-- **renderer/renderer.js** — calls `getDisplayMedia`, discards the video track,
-  feeds the loopback audio through a Web Audio `MediaStreamSource` into Butterchurn,
-  and runs the render loop. Capture and audio context are fully torn down when
-  hidden, so the app uses ~0 GPU when idle in the tray.
-- **Presets** — the base + extra packs from
-  [butterchurn-presets](https://github.com/jberg/butterchurn-presets) (~367 presets),
-  shuffled on each start.
+- **main.js** — tray, global hotkeys, fullscreen window management, Cast
+  session control. A `setDisplayMediaRequestHandler` grants `getDisplayMedia`
+  the primary screen with `audio: 'loopback'` (Electron's built-in WASAPI
+  system-audio capture — no picker, no virtual audio cable).
+- **renderer/renderer.js** — local visualizer + the TV Mode "tap" that
+  decimates captured audio to 48 kHz stereo PCM and relays it via IPC.
+- **tvserver.js** — HTTP + WebSocket server: serves the TV/remote pages,
+  broadcasts audio frames and control messages to connected screens.
+- **renderer/tv.js** — browser-side client: jitter-buffers received PCM,
+  resamples into a Web Audio graph feeding Butterchurn and the speakers.
+- **castclient.js** — minimal Google Cast v2 sender + SSDP discovery.
 
-## Notes
+## Credits & acknowledgements
 
-- Audio capture starts when the visualizer is shown, so there's a ~quarter-second
-  spin-up on toggle. Nothing is captured or rendered while hidden.
-- The Electron "Insecure Content-Security-Policy" warning in dev mode is expected:
-  Butterchurn compiles Milkdrop preset equations at runtime, which requires eval.
-  The app only loads local files.
+Butterdrop is glue around other people's brilliant work:
+
+- **[Butterchurn](https://github.com/jberg/butterchurn)** by Jordan Berg
+  (jberg) — the WebGL implementation of the MilkDrop 2 visualizer that does
+  all the actual rendering. MIT licensed.
+- **[butterchurn-presets](https://github.com/jberg/butterchurn-presets)** —
+  the preset collections, converted from original MilkDrop presets written
+  over two decades by the MilkDrop preset community (Flexi, Geiss, martin,
+  shifter, Rovastar, and many more — preset names carry their authors).
+- **[MilkDrop](https://www.geisswerks.com/milkdrop/)** by Ryan Geiss — the
+  original Winamp visualizer (2001) that started all of this.
+- **[DashCast](https://github.com/stestagg/dashcast)** by Steve Stagg
+  (stestagg), and the [fork by John Wells (madmod)](https://github.com/madmod/dashcast)
+  whose hosted Cast receiver (app `84912283`) Butterdrop uses to display the
+  visualizer URL on Cast devices.
+- **[Electron](https://www.electronjs.org/)** — app shell, tray, global
+  shortcuts, and the WASAPI loopback capture.
+- **[ws](https://github.com/websockets/ws)** — the WebSocket server that
+  carries audio to the TVs.
+
+## License
+
+MIT (see Butterchurn's and other projects' licenses for their components).

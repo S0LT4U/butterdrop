@@ -16,6 +16,7 @@ const fs = require('fs');
 const os = require('os');
 const crypto = require('crypto');
 const tvServer = require('./tvserver');
+const cast = require('./castclient');
 
 const DEFAULT_CONFIG = {
   hotkey: 'Control+Alt+V',
@@ -46,6 +47,10 @@ let win = null;
 let visible = false;
 let tvActive = false;
 let tvClients = 0;
+let castDevices = [];
+let castSession = null;
+let castTargetName = '';
+let castBusy = false;
 
 function loadOrCreateToken() {
   const tokenPath = path.join(app.getPath('userData'), 'tv-token');
@@ -91,6 +96,7 @@ function startTvMode() {
       tvClients = n;
       refreshTrayMenu();
     },
+    onControl: (action) => handleRemoteControl(action),
   });
   sendWhenLoaded('viz:capture-start');
   tvActive = true;
@@ -98,6 +104,65 @@ function startTvMode() {
   saveConfig();
   refreshTrayMenu();
   console.log(`TV Mode on: ${tvUrl()}`);
+}
+
+async function refreshCastDevices() {
+  castDevices = await cast.discover(3500);
+  console.log(`Cast devices found: ${castDevices.map((d) => d.name).join(', ') || 'none'}`);
+  refreshTrayMenu();
+}
+
+async function castTo(device) {
+  if (castBusy) return;
+  castBusy = true;
+  try {
+    if (!tvActive) startTvMode();
+    if (castSession) {
+      try {
+        await castSession.stop();
+      } catch {}
+      castSession = null;
+    }
+    const session = new cast.CastSession(device.host);
+    session.on('closed', () => {
+      if (castSession === session) {
+        castSession = null;
+        castTargetName = '';
+        refreshTrayMenu();
+      }
+    });
+    session.on('error', (err) => console.error(`Cast error: ${err.message}`));
+    await session.launch(`${tvUrl()}&autostart=1`);
+    castSession = session;
+    castTargetName = device.name;
+    console.log(`Casting to ${device.name} (${device.host})`);
+  } catch (err) {
+    console.error(`Cast to ${device.name} failed: ${err.message}`);
+  } finally {
+    castBusy = false;
+    refreshTrayMenu();
+  }
+}
+
+async function stopCasting() {
+  if (!castSession) return;
+  const session = castSession;
+  castSession = null;
+  castTargetName = '';
+  try {
+    await session.stop();
+  } catch {}
+  refreshTrayMenu();
+}
+
+function handleRemoteControl(action) {
+  if (action === 'next' && win && visible) win.webContents.send('viz:next-preset');
+  if (action === 'prev' && win && visible) win.webContents.send('viz:prev-preset');
+  if (action === 'cast') {
+    const device = castDevices.find((d) => d.name === castTargetName) || castDevices[0];
+    if (device) castTo(device);
+  }
+  if (action === 'stopcast') stopCasting();
 }
 
 function stopTvMode() {
@@ -224,8 +289,11 @@ function refreshTrayMenu() {
     },
     {
       label: 'Next Preset',
-      enabled: visible,
-      click: () => win && win.webContents.send('viz:next-preset'),
+      enabled: visible || (tvActive && tvClients > 0),
+      click: () => {
+        if (win && visible) win.webContents.send('viz:next-preset');
+        if (tvActive) tvServer.control({ type: 'nextPreset' });
+      },
     },
     {
       label: `Select Audio Source…\t${config.pickerHotkey}`,
@@ -239,9 +307,33 @@ function refreshTrayMenu() {
       click: (item) => (item.checked ? startTvMode() : stopTvMode()),
     },
     {
+      label: 'Cast to…',
+      submenu: [
+        ...castDevices.map((d) => ({
+          label: d.name + (d.name === castTargetName ? ' ✓' : ''),
+          click: () => castTo(d),
+        })),
+        ...(castDevices.length ? [{ type: 'separator' }] : []),
+        {
+          label: castDevices.length ? 'Refresh Devices' : 'Search for Devices',
+          click: () => refreshCastDevices(),
+        },
+      ],
+    },
+    {
+      label: castTargetName ? `Stop Casting (${castTargetName})` : 'Stop Casting',
+      enabled: !!castSession,
+      click: () => stopCasting(),
+    },
+    {
       label: 'Copy TV URL',
       enabled: tvActive,
       click: () => clipboard.writeText(tvUrl()),
+    },
+    {
+      label: 'Copy Phone Remote URL',
+      enabled: tvActive,
+      click: () => clipboard.writeText(`http://${lanIp()}:${config.tvPort}/remote?t=${loadOrCreateToken()}`),
     },
     { type: 'separator' },
     {
@@ -297,6 +389,8 @@ app.whenReady().then(() => {
   if (config.tvMode) {
     startTvMode();
   }
+
+  refreshCastDevices();
 
   const registered = globalShortcut.register(config.hotkey, () => toggleVisualizer());
   if (!registered) {

@@ -1,7 +1,8 @@
 'use strict';
 
 // Butterdrop TV client: receives raw audio samples from the media PC over
-// WebSocket and renders Butterchurn locally on this device's GPU.
+// WebSocket, renders Butterchurn locally on this device's GPU, and plays the
+// audio (mute with the M key, the remote page, or the device's own volume).
 
 const bc = window.butterchurn && (window.butterchurn.default || window.butterchurn);
 const canvas = document.getElementById('canvas');
@@ -9,18 +10,26 @@ const statusEl = document.getElementById('status');
 const statusText = document.getElementById('status-text');
 const toast = document.getElementById('toast');
 
-const token = new URLSearchParams(location.search).get('t') || '';
+const params = new URLSearchParams(location.search);
+const token = params.get('t') || '';
+// Cast receivers have no way to click; they're exempt from autoplay
+// restrictions, so start immediately when asked to.
+const autostart = params.get('autostart') === '1';
 
 let audioCtx = null;
 let visualizer = null;
+let outputGain = null;
+let soundOn = params.get('sound') !== '0';
 let ws = null;
 let started = false;
 let serverRate = 48000;
+let channels = 2;
 let toastTimer = null;
 
-// Ring buffer of received samples (~8s capacity), consumed with linear
+// Ring buffers (~8s) of received samples per channel, consumed with linear
 // resampling to bridge server/client sample-rate differences.
-let ring = null;
+let ringL = null;
+let ringR = null;
 let ringSize = 0;
 let writeIdx = 0;
 let readPos = 0;
@@ -61,29 +70,51 @@ function shuffle(arr) {
   return arr;
 }
 
-function nextPreset(blend = 2.7) {
+function loadPresetAt(index, blend = 2.7) {
   if (!visualizer || presetKeys.length === 0) return;
-  presetIndex = (presetIndex + 1) % presetKeys.length;
+  presetIndex = ((index % presetKeys.length) + presetKeys.length) % presetKeys.length;
   visualizer.loadPreset(presets[presetKeys[presetIndex]], blend);
   showToast(presetKeys[presetIndex]);
 }
 
+function nextPreset() {
+  loadPresetAt(presetIndex + 1);
+}
+
+function prevPreset() {
+  loadPresetAt(presetIndex - 1);
+}
+
+function setSound(on) {
+  soundOn = on;
+  if (outputGain) outputGain.gain.value = on ? 1 : 0;
+  showToast(on ? 'Sound on' : 'Sound muted');
+}
+
 function initRing() {
   ringSize = serverRate * 8;
-  ring = new Float32Array(ringSize);
+  ringL = new Float32Array(ringSize);
+  ringR = new Float32Array(ringSize);
   writeIdx = 0;
   readPos = 0;
   buffered = 0;
 }
 
 function pushSamples(int16) {
-  for (let i = 0; i < int16.length; i++) {
-    ring[writeIdx] = int16[i] / 0x8000;
+  const frames = channels === 2 ? int16.length / 2 : int16.length;
+  for (let i = 0; i < frames; i++) {
+    if (channels === 2) {
+      ringL[writeIdx] = int16[i * 2] / 0x8000;
+      ringR[writeIdx] = int16[i * 2 + 1] / 0x8000;
+    } else {
+      ringL[writeIdx] = int16[i] / 0x8000;
+      ringR[writeIdx] = ringL[writeIdx];
+    }
     writeIdx = (writeIdx + 1) % ringSize;
   }
-  buffered = Math.min(buffered + int16.length, ringSize);
+  buffered = Math.min(buffered + frames, ringSize);
   // If the reader fell too far behind (tab was backgrounded), skip ahead to
-  // keep visuals in sync with the music.
+  // keep audio and visuals in sync with the music.
   if (buffered > serverRate) {
     readPos = (writeIdx - Math.floor(serverRate * 0.2) + ringSize) % ringSize;
     buffered = Math.floor(serverRate * 0.2);
@@ -98,9 +129,19 @@ function connect() {
   ws.onmessage = (event) => {
     if (typeof event.data === 'string') {
       const msg = JSON.parse(event.data);
-      if (msg.type === 'format' && msg.sampleRate !== serverRate) {
-        serverRate = msg.sampleRate;
-        initRing();
+      if (msg.type === 'format') {
+        const newChannels = msg.channels || 1;
+        if (msg.sampleRate !== serverRate || newChannels !== channels) {
+          serverRate = msg.sampleRate;
+          channels = newChannels;
+          initRing();
+        }
+      } else if (msg.type === 'nextPreset') {
+        nextPreset();
+      } else if (msg.type === 'prevPreset') {
+        prevPreset();
+      } else if (msg.type === 'sound') {
+        setSound(msg.on);
       }
       return;
     }
@@ -131,26 +172,28 @@ function start() {
     pixelRatio: window.devicePixelRatio || 1,
   });
 
-  // Feed received samples into Butterchurn through a silent processing node.
-  const ratio = () => serverRate / audioCtx.sampleRate;
-  const feeder = audioCtx.createScriptProcessor(2048, 1, 1);
-  const silence = audioCtx.createGain();
-  silence.gain.value = 0;
-  feeder.connect(silence);
-  silence.connect(audioCtx.destination);
+  // Feed received samples into Butterchurn and out the device's speakers.
+  const feeder = audioCtx.createScriptProcessor(2048, 1, 2);
+  outputGain = audioCtx.createGain();
+  outputGain.gain.value = soundOn ? 1 : 0;
+  feeder.connect(outputGain);
+  outputGain.connect(audioCtx.destination);
   feeder.onaudioprocess = (e) => {
-    const out = e.outputBuffer.getChannelData(0);
-    const r = ratio();
-    for (let i = 0; i < out.length; i++) {
+    const outL = e.outputBuffer.getChannelData(0);
+    const outR = e.outputBuffer.getChannelData(1);
+    const r = serverRate / audioCtx.sampleRate;
+    for (let i = 0; i < outL.length; i++) {
       if (buffered < 2) {
-        out[i] = 0;
+        outL[i] = 0;
+        outR[i] = 0;
         continue;
       }
       const idx = Math.floor(readPos);
       const frac = readPos - idx;
-      const a = ring[idx % ringSize];
-      const b = ring[(idx + 1) % ringSize];
-      out[i] = a * (1 - frac) + b * frac;
+      const j = idx % ringSize;
+      const k = (idx + 1) % ringSize;
+      outL[i] = ringL[j] * (1 - frac) + ringL[k] * frac;
+      outR[i] = ringR[j] * (1 - frac) + ringR[k] * frac;
       readPos = (readPos + r) % ringSize;
       buffered -= r;
     }
@@ -189,6 +232,10 @@ window.addEventListener('keydown', (e) => {
     start();
   } else if (started && (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowRight')) {
     nextPreset();
+  } else if (started && e.key === 'ArrowLeft') {
+    prevPreset();
+  } else if (started && (e.key === 'm' || e.key === 'M')) {
+    setSound(!soundOn);
   }
 });
 canvas.addEventListener('click', () => {
@@ -197,4 +244,6 @@ canvas.addEventListener('click', () => {
 
 if (!bc) {
   statusText.textContent = 'Failed to load visualizer engine';
+} else if (autostart) {
+  start();
 }

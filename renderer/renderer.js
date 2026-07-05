@@ -208,23 +208,28 @@ let tapRate = 48000;
 function createTap() {
   if (tapNode) return;
   // Hi-res outputs (96/192 kHz) waste bandwidth on the wire; decimate by
-  // averaging down to ~48 kHz before sending.
+  // averaging down to ~48 kHz before sending. Stereo interleaved 16-bit.
   const factor = Math.max(1, Math.round(audioCtx.sampleRate / 48000));
   tapRate = audioCtx.sampleRate / factor;
-  tapNode = audioCtx.createScriptProcessor(4096, 1, 1);
+  tapNode = audioCtx.createScriptProcessor(4096, 2, 2);
   tapSilence = audioCtx.createGain();
   tapSilence.gain.value = 0;
   tapNode.connect(tapSilence);
   tapSilence.connect(audioCtx.destination);
   tapNode.onaudioprocess = (e) => {
-    const input = e.inputBuffer.getChannelData(0);
-    const n = Math.floor(input.length / factor);
-    const out = new Int16Array(n);
+    const inL = e.inputBuffer.getChannelData(0);
+    const inR = e.inputBuffer.numberOfChannels > 1 ? e.inputBuffer.getChannelData(1) : inL;
+    const n = Math.floor(inL.length / factor);
+    const out = new Int16Array(n * 2);
     for (let o = 0; o < n; o++) {
-      let sum = 0;
-      for (let k = 0; k < factor; k++) sum += input[o * factor + k];
-      const s = Math.max(-1, Math.min(1, sum / factor));
-      out[o] = s * 0x7fff;
+      let sumL = 0;
+      let sumR = 0;
+      for (let k = 0; k < factor; k++) {
+        sumL += inL[o * factor + k];
+        sumR += inR[o * factor + k];
+      }
+      out[o * 2] = Math.max(-1, Math.min(1, sumL / factor)) * 0x7fff;
+      out[o * 2 + 1] = Math.max(-1, Math.min(1, sumR / factor)) * 0x7fff;
     }
     window.vizAPI.sendAudio(out.buffer);
   };
@@ -247,7 +252,7 @@ async function captureStart() {
   try {
     await ensureAudio();
     createTap();
-    window.vizAPI.sendAudioFormat(tapRate);
+    window.vizAPI.sendAudioFormat({ sampleRate: tapRate, channels: 2 });
     console.log(`TV capture running (device: ${audioCtx.sampleRate} Hz, wire: ${tapRate} Hz)`);
   } catch (err) {
     captureWanted = false;
@@ -426,6 +431,7 @@ window.addEventListener('keydown', (e) => {
 window.vizAPI.onStart((options) => start(options));
 window.vizAPI.onStop(() => stop());
 window.vizAPI.onNextPreset(() => nextPreset());
+window.vizAPI.onPrevPreset(() => prevPreset());
 window.vizAPI.onOpenPicker(() => {
   if (!running) return;
   if (pickerOpen) {

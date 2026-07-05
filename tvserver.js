@@ -16,11 +16,19 @@ const LIB_FILES = {
 let server = null;
 let wss = null;
 let clients = new Set();
-let sampleRate = 48000;
+let format = { sampleRate: 48000, channels: 2 };
 
-function setFormat(rate) {
-  sampleRate = rate;
-  const msg = JSON.stringify({ type: 'format', sampleRate });
+function setFormat(newFormat) {
+  format = newFormat;
+  const msg = JSON.stringify({ type: 'format', ...format });
+  for (const ws of clients) {
+    if (ws.readyState === ws.OPEN) ws.send(msg);
+  }
+}
+
+// Broadcast a control message (nextPreset / prevPreset / sound) to all screens.
+function control(message) {
+  const msg = JSON.stringify(message);
   for (const ws of clients) {
     if (ws.readyState === ws.OPEN) ws.send(msg);
   }
@@ -39,7 +47,7 @@ function clientCount() {
   return clients.size;
 }
 
-function start({ port, token, baseDir, onClientChange }) {
+function start({ port, token, baseDir, onClientChange, onControl }) {
   if (server) return;
 
   const serveFile = (res, filePath, type) => {
@@ -63,6 +71,36 @@ function start({ port, token, baseDir, onClientChange }) {
         return;
       }
       serveFile(res, path.join(baseDir, 'renderer', 'tv.html'), 'text/html');
+    } else if (url.pathname === '/remote') {
+      if (url.searchParams.get('t') !== token) {
+        res.writeHead(403);
+        res.end('Forbidden: missing or bad token');
+        return;
+      }
+      serveFile(res, path.join(baseDir, 'renderer', 'remote.html'), 'text/html');
+    } else if (url.pathname === '/control' && req.method === 'POST') {
+      if (url.searchParams.get('t') !== token) {
+        res.writeHead(403);
+        res.end('Forbidden');
+        return;
+      }
+      let body = '';
+      req.on('data', (c) => (body += c));
+      req.on('end', () => {
+        try {
+          const { action } = JSON.parse(body);
+          if (action === 'next') control({ type: 'nextPreset' });
+          if (action === 'prev') control({ type: 'prevPreset' });
+          if (action === 'sound-on') control({ type: 'sound', on: true });
+          if (action === 'sound-off') control({ type: 'sound', on: false });
+          if (onControl) onControl(action);
+          res.writeHead(204);
+          res.end();
+        } catch {
+          res.writeHead(400);
+          res.end('Bad request');
+        }
+      });
     } else if (url.pathname === '/tv.js') {
       serveFile(res, path.join(baseDir, 'renderer', 'tv.js'), 'text/javascript');
     } else if (LIB_FILES[url.pathname]) {
@@ -83,7 +121,7 @@ function start({ port, token, baseDir, onClientChange }) {
     }
     wss.handleUpgrade(req, socket, head, (ws) => {
       clients.add(ws);
-      ws.send(JSON.stringify({ type: 'format', sampleRate }));
+      ws.send(JSON.stringify({ type: 'format', ...format }));
       ws.on('close', () => {
         clients.delete(ws);
         if (onClientChange) onClientChange(clients.size);
@@ -115,4 +153,4 @@ function stop() {
   }
 }
 
-module.exports = { start, stop, broadcast, setFormat, clientCount };
+module.exports = { start, stop, broadcast, setFormat, control, clientCount };
