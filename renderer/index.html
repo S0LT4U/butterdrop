@@ -37,11 +37,65 @@
     #hud.visible {
       opacity: 1;
     }
+    #picker {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: rgba(10, 10, 16, 0.88);
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      border-radius: 12px;
+      padding: 18px 0 10px;
+      min-width: 420px;
+      max-width: 70vw;
+      color: #eee;
+      font: 400 15px/1.5 "Segoe UI", sans-serif;
+      display: none;
+      cursor: default;
+      backdrop-filter: blur(12px);
+      box-shadow: 0 12px 48px rgba(0, 0, 0, 0.7);
+    }
+    #picker.open {
+      display: block;
+    }
+    #picker h2 {
+      margin: 0 22px 10px;
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: rgba(255, 255, 255, 0.55);
+    }
+    #picker .item {
+      padding: 9px 22px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    #picker .item.selected {
+      background: linear-gradient(90deg, rgba(168, 85, 247, 0.35), rgba(34, 211, 238, 0.25));
+    }
+    #picker .item .badge {
+      font-size: 11px;
+      color: rgba(255, 255, 255, 0.5);
+      margin-left: auto;
+    }
+    #picker .hint {
+      margin: 10px 22px 6px;
+      font-size: 12px;
+      color: rgba(255, 255, 255, 0.4);
+    }
   </style>
 </head>
 <body>
   <canvas id="canvas"></canvas>
   <div id="hud"></div>
+  <div id="picker">
+    <h2>Audio Source</h2>
+    <div id="picker-list"></div>
+    <div class="hint">&uarr;&darr; select &middot; Enter apply &middot; Esc close</div>
+  </div>
   <script src="../node_modules/butterchurn/lib/butterchurn.min.js"></script>
   <script src="../node_modules/butterchurn-presets/lib/butterchurnPresets.min.js"></script>
   <script src="../node_modules/butterchurn-presets/lib/butterchurnPresetsExtra.min.js"></script>

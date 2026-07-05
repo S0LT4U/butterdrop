@@ -15,6 +15,7 @@ const fs = require('fs');
 
 const DEFAULT_CONFIG = {
   hotkey: 'Control+Alt+V',
+  pickerHotkey: 'Alt+Shift+V',
   presetIntervalSeconds: 30,
   presetBlendSeconds: 2.7,
 };
@@ -82,7 +83,7 @@ function sendWhenLoaded(channel, ...args) {
   }
 }
 
-function showVisualizer() {
+function showVisualizer(showPicker = false) {
   if (!win) createWindow();
   const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
   win.setBounds(display.bounds);
@@ -93,9 +94,18 @@ function showVisualizer() {
   sendWhenLoaded('viz:start', {
     presetIntervalSeconds: config.presetIntervalSeconds,
     presetBlendSeconds: config.presetBlendSeconds,
+    showPicker,
   });
   visible = true;
   refreshTrayMenu();
+}
+
+function openSourcePicker() {
+  if (visible) {
+    win.webContents.send('viz:open-picker');
+  } else {
+    showVisualizer(true);
+  }
 }
 
 function hideVisualizer() {
@@ -126,6 +136,10 @@ function refreshTrayMenu() {
       label: 'Next Preset',
       enabled: visible,
       click: () => win && win.webContents.send('viz:next-preset'),
+    },
+    {
+      label: `Select Audio Source…\t${config.pickerHotkey}`,
+      click: () => openSourcePicker(),
     },
     { type: 'separator' },
     {
@@ -165,6 +179,11 @@ app.whenReady().then(() => {
     { useSystemPicker: false }
   );
 
+  // Allow microphone/line-in capture (for the source picker); deny everything else.
+  session.defaultSession.setPermissionRequestHandler((webContents, permission, callback) => {
+    callback(permission === 'media');
+  });
+
   ipcMain.on('viz:hide', () => hideVisualizer());
 
   createWindow();
@@ -177,13 +196,20 @@ app.whenReady().then(() => {
     console.log(`Butterdrop running in tray. Hotkey: ${config.hotkey}`);
   }
 
+  const pickerRegistered = globalShortcut.register(config.pickerHotkey, () => openSourcePicker());
+  if (!pickerRegistered) {
+    console.error(`Failed to register picker hotkey: ${config.pickerHotkey} (already in use?)`);
+  } else {
+    console.log(`Source picker hotkey: ${config.pickerHotkey}`);
+  }
+
   if (process.argv.includes('--show')) {
     showVisualizer();
   }
 
-  // Self-test: show the visualizer, run briefly, then exit.
+  // Self-test: show the visualizer with the source picker, run briefly, then exit.
   if (process.argv.includes('--smoke')) {
-    showVisualizer();
+    showVisualizer(true);
     setTimeout(() => {
       hideVisualizer();
       setTimeout(() => app.quit(), 500);

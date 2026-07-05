@@ -3,11 +3,16 @@
 const bc = window.butterchurn && (window.butterchurn.default || window.butterchurn);
 const canvas = document.getElementById('canvas');
 const hud = document.getElementById('hud');
+const picker = document.getElementById('picker');
+const pickerList = document.getElementById('picker-list');
+
+const SYSTEM_SOURCE = 'system';
 
 let running = false;
 let stream = null;
 let audioCtx = null;
 let visualizer = null;
+let sourceNode = null;
 let rafId = null;
 let cycleTimer = null;
 let hudTimer = null;
@@ -17,6 +22,14 @@ let presetIndex = 0;
 let presets = {};
 let blendSeconds = 2.7;
 let intervalSeconds = 30;
+
+let pickerOpen = false;
+let pickerItems = [];
+let pickerSelected = 0;
+
+function savedSource() {
+  return localStorage.getItem('audioSource') || SYSTEM_SOURCE;
+}
 
 function collectPresets() {
   const packs = [
@@ -85,21 +98,131 @@ function renderLoop() {
   visualizer.render();
 }
 
+// --- Audio sources ---
+
+async function getAudioStream(sourceId) {
+  if (sourceId === SYSTEM_SOURCE) {
+    // Main process grants this with system-audio loopback — no picker shown.
+    const s = await navigator.mediaDevices.getDisplayMedia({ audio: true, video: true });
+    s.getVideoTracks().forEach((t) => t.stop());
+    if (s.getAudioTracks().length === 0) {
+      throw new Error('No loopback audio track available');
+    }
+    return s;
+  }
+  return navigator.mediaDevices.getUserMedia({
+    audio: {
+      deviceId: { exact: sourceId },
+      echoCancellation: false,
+      noiseSuppression: false,
+      autoGainControl: false,
+    },
+  });
+}
+
+function attachStream(newStream) {
+  if (sourceNode) {
+    try {
+      sourceNode.disconnect();
+    } catch {}
+  }
+  if (stream) {
+    stream.getTracks().forEach((t) => t.stop());
+  }
+  stream = newStream;
+  sourceNode = audioCtx.createMediaStreamSource(stream);
+  visualizer.connectAudio(sourceNode);
+}
+
+async function switchSource(sourceId, label) {
+  try {
+    const newStream = await getAudioStream(sourceId);
+    attachStream(newStream);
+    localStorage.setItem('audioSource', sourceId);
+    showHud(`Source: ${label}`);
+    console.log(`Audio source switched: ${label}`);
+  } catch (err) {
+    console.error(`Failed to switch source: ${err.message}`);
+    showHud(`Couldn't use that source: ${err.message}`, 5000);
+  }
+}
+
+// --- Source picker overlay ---
+
+async function listSources() {
+  const devices = await navigator.mediaDevices.enumerateDevices();
+  const inputs = devices.filter((d) => d.kind === 'audioinput' && d.deviceId !== 'default' && d.deviceId !== 'communications');
+  const items = [
+    { id: SYSTEM_SOURCE, label: 'System Audio', badge: 'everything Windows plays' },
+  ];
+  inputs.forEach((d, i) => {
+    items.push({ id: d.deviceId, label: d.label || `Audio input ${i + 1}`, badge: 'input' });
+  });
+  return items;
+}
+
+function renderPicker() {
+  pickerList.innerHTML = '';
+  pickerItems.forEach((item, i) => {
+    const el = document.createElement('div');
+    el.className = 'item' + (i === pickerSelected ? ' selected' : '');
+    const label = document.createElement('span');
+    label.textContent = item.label;
+    const badge = document.createElement('span');
+    badge.className = 'badge';
+    badge.textContent = item.badge;
+    el.append(label, badge);
+    el.addEventListener('click', () => {
+      pickerSelected = i;
+      applyPickerSelection();
+    });
+    el.addEventListener('mousemove', () => {
+      if (pickerSelected !== i) {
+        pickerSelected = i;
+        renderPicker();
+      }
+    });
+    pickerList.appendChild(el);
+  });
+}
+
+async function openPicker() {
+  pickerItems = await listSources();
+  console.log(`Sources available: ${pickerItems.length}`);
+  const current = savedSource();
+  pickerSelected = Math.max(0, pickerItems.findIndex((it) => it.id === current));
+  renderPicker();
+  picker.classList.add('open');
+  document.body.style.cursor = 'default';
+  pickerOpen = true;
+}
+
+function closePicker() {
+  picker.classList.remove('open');
+  document.body.style.cursor = 'none';
+  pickerOpen = false;
+}
+
+function applyPickerSelection() {
+  const item = pickerItems[pickerSelected];
+  closePicker();
+  if (item && item.id !== savedSource()) {
+    switchSource(item.id, item.label);
+  }
+}
+
+// --- Lifecycle ---
+
 async function start(options) {
-  if (running) return;
+  if (running) {
+    if (options && options.showPicker) openPicker();
+    return;
+  }
   running = true;
   intervalSeconds = (options && options.presetIntervalSeconds) || 30;
   blendSeconds = (options && options.presetBlendSeconds) || 2.7;
 
   try {
-    // Main process grants this with system-audio loopback — no picker shown.
-    stream = await navigator.mediaDevices.getDisplayMedia({ audio: true, video: true });
-    stream.getVideoTracks().forEach((t) => t.stop());
-
-    if (stream.getAudioTracks().length === 0) {
-      throw new Error('No loopback audio track available');
-    }
-
     audioCtx = new AudioContext();
     await audioCtx.resume();
 
@@ -110,8 +233,20 @@ async function start(options) {
       pixelRatio: window.devicePixelRatio || 1,
     });
 
-    const source = audioCtx.createMediaStreamSource(stream);
-    visualizer.connectAudio(source);
+    let sourceId = savedSource();
+    try {
+      attachStream(await getAudioStream(sourceId));
+    } catch (err) {
+      // Saved device may be unplugged — fall back to system loopback.
+      if (sourceId !== SYSTEM_SOURCE) {
+        console.error(`Saved source unavailable (${err.message}), falling back to system audio`);
+        sourceId = SYSTEM_SOURCE;
+        localStorage.setItem('audioSource', sourceId);
+        attachStream(await getAudioStream(sourceId));
+      } else {
+        throw err;
+      }
+    }
 
     presets = collectPresets();
     presetKeys = shuffle(Object.keys(presets));
@@ -119,7 +254,9 @@ async function start(options) {
     loadPreset(0, 0);
     restartCycle();
     renderLoop();
-    console.log('Visualizer started (system audio loopback connected)');
+    console.log(`Visualizer started (source: ${sourceId === SYSTEM_SOURCE ? 'system loopback' : 'input device'})`);
+
+    if (options && options.showPicker) openPicker();
   } catch (err) {
     running = false;
     console.error(`Failed to start visualizer: ${err.message}`);
@@ -130,12 +267,14 @@ async function start(options) {
 function stop() {
   if (!running) return;
   running = false;
+  closePicker();
   cancelAnimationFrame(rafId);
   clearInterval(cycleTimer);
   if (stream) {
     stream.getTracks().forEach((t) => t.stop());
     stream = null;
   }
+  sourceNode = null;
   if (audioCtx) {
     audioCtx.close();
     audioCtx = null;
@@ -149,6 +288,26 @@ function stop() {
 window.addEventListener('resize', sizeCanvas);
 
 window.addEventListener('keydown', (e) => {
+  if (pickerOpen) {
+    switch (e.key) {
+      case 'ArrowUp':
+        pickerSelected = (pickerSelected - 1 + pickerItems.length) % pickerItems.length;
+        renderPicker();
+        break;
+      case 'ArrowDown':
+        pickerSelected = (pickerSelected + 1) % pickerItems.length;
+        renderPicker();
+        break;
+      case 'Enter':
+        applyPickerSelection();
+        break;
+      case 'Escape':
+        closePicker();
+        break;
+    }
+    e.preventDefault();
+    return;
+  }
   switch (e.key) {
     case 'Escape':
       window.vizAPI.hide();
@@ -160,12 +319,24 @@ window.addEventListener('keydown', (e) => {
     case 'ArrowLeft':
       prevPreset();
       break;
+    case 's':
+    case 'S':
+      openPicker();
+      break;
   }
 });
 
 window.vizAPI.onStart((options) => start(options));
 window.vizAPI.onStop(() => stop());
 window.vizAPI.onNextPreset(() => nextPreset());
+window.vizAPI.onOpenPicker(() => {
+  if (!running) return;
+  if (pickerOpen) {
+    closePicker();
+  } else {
+    openPicker();
+  }
+});
 
 if (!bc) {
   console.error('Butterchurn failed to load');

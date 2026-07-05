@@ -18,9 +18,17 @@ The app starts hidden in the system tray (purple/cyan waveform icon).
 | Key | Action |
 | --- | --- |
 | `Ctrl+Alt+V` (global) | Toggle fullscreen visualizer on/off |
-| `Esc` | Hide visualizer |
+| `Alt+Shift+V` (global) | Open visualizer with the audio-source picker |
+| `Esc` | Hide visualizer (or close the picker if open) |
 | `Space` / `→` | Next preset |
 | `←` | Previous preset |
+| `S` | Open audio-source picker |
+
+The source picker lets you choose what drives the visuals: **System Audio**
+(WASAPI loopback — everything Windows plays, the default) or any audio input
+device (microphone, line-in, Stereo Mix, USB mixer). Switching is live; the
+choice is remembered across sessions. If a remembered device is unplugged,
+Butterdrop falls back to System Audio.
 
 Presets auto-rotate every 30 seconds with a crossfade blend. The preset name
 shows briefly in the top-left when it changes. The visualizer opens on
@@ -38,6 +46,7 @@ Edit `config.json` (restart the app to apply):
 ```json
 {
   "hotkey": "Control+Alt+V",
+  "pickerHotkey": "Alt+Shift+V",
   "presetIntervalSeconds": 30,
   "presetBlendSeconds": 2.7
 }
