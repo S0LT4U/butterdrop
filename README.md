@@ -77,8 +77,10 @@ your LAN (default port 8720):
   your phone's home screen.
 
 The audio feed is 48 kHz stereo 16-bit (~190 KB/s per screen — less than a
-Spotify stream). Hi-res outputs (96/192 kHz) are downsampled on the wire.
-Multiple screens can connect at once; each renders independently.
+Spotify stream). Hi-res outputs (96/192 kHz) are resampled on the wire, and
+mic-style processing (auto gain control, noise suppression) is disabled on
+the capture, so levels stay steady and faithful to the source. Multiple
+screens can connect at once; each renders independently.
 
 **Sound:** every screen plays the audio it receives — mute whichever ones
 you don't want (TV remote, M key on the TV page, phone remote, or PC
@@ -89,9 +91,12 @@ are perfectly synced with *each other*, just behind the PC. Pick one place
 to listen.
 
 **Performance:** TVs render at a capped internal resolution (default 1280,
-`?res=` to override) and at most 30 fps, with automatic downscaling if the
-device can't keep up. A few presets are extremely CPU-heavy and will dip on
-TV hardware regardless — skip them with the remote.
+`?res=` to override) and at most 30 fps. The page tunes itself to the
+device: resolution scales down when it struggles and back up on light
+presets, and presets whose math is simply too heavy for the device are
+auto-skipped and remembered, so each screen gradually curates a set it can
+actually run. Playback registers as genuine video, so the TV's screensaver
+won't cut in mid-session.
 
 Playing music from your phone? Use Spotify Connect (or similar casting) to
 make this PC the playback device — Butterdrop visualizes whatever the PC
@@ -116,7 +121,9 @@ so use the phone remote or tray to change presets on a casted screen.
 
 The Cast implementation is dependency-free — a minimal Cast v2 protocol
 client (`castclient.js`) speaking hand-encoded protobuf over TLS, with SSDP
-(DIAL) discovery.
+(DIAL) discovery across all network interfaces. Found devices are remembered
+(locally, outside the repo) and re-probed on refresh, so a known TV shows up
+even when it ignores a discovery broadcast.
 
 ## Configuration
 
@@ -161,12 +168,16 @@ waiting in the tray after every boot.
   session control. A `setDisplayMediaRequestHandler` grants `getDisplayMedia`
   the primary screen with `audio: 'loopback'` (Electron's built-in WASAPI
   system-audio capture — no picker, no virtual audio cable).
-- **renderer/renderer.js** — local visualizer + the TV Mode "tap" that
-  decimates captured audio to 48 kHz stereo PCM and relays it via IPC.
+- **renderer/renderer.js + tap-worklet.js** — local visualizer + the TV Mode
+  capture tap. The tap runs in an AudioWorklet on the audio thread, so heavy
+  preset rendering can't starve it and glitch the stream.
 - **tvserver.js** — HTTP + WebSocket server: serves the TV/remote pages,
-  broadcasts audio frames and control messages to connected screens.
-- **renderer/tv.js** — browser-side client: jitter-buffers received PCM,
-  resamples into a Web Audio graph feeding Butterchurn and the speakers.
+  streams audio as an endless WAV, and broadcasts control messages to
+  connected screens.
+- **renderer/tv.js** — browser-side client: plays the WAV stream through the
+  device's native media pipeline (glitch-immune), feeds it to Butterchurn
+  for analysis, adapts render quality, and reports telemetry back to the PC
+  logs for debugging.
 - **castclient.js** — minimal Google Cast v2 sender + SSDP discovery.
 
 ## Credits & acknowledgements
