@@ -57,7 +57,7 @@ function start({ port, token, baseDir, onClientChange, onControl }) {
         res.end('Not found');
         return;
       }
-      res.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'no-cache' });
+      res.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'no-store' });
       res.end(data);
     });
   };
@@ -101,6 +101,19 @@ function start({ port, token, baseDir, onClientChange, onControl }) {
           res.end('Bad request');
         }
       });
+    } else if (url.pathname === '/clienterr' && req.method === 'POST') {
+      if (url.searchParams.get('t') !== token) {
+        res.writeHead(403);
+        res.end();
+        return;
+      }
+      let body = '';
+      req.on('data', (c) => (body += c));
+      req.on('end', () => {
+        console.log(`[tv-client-report ${req.socket.remoteAddress}] ${body.slice(0, 500)}`);
+        res.writeHead(204);
+        res.end();
+      });
     } else if (url.pathname === '/tv.js') {
       serveFile(res, path.join(baseDir, 'renderer', 'tv.js'), 'text/javascript');
     } else if (LIB_FILES[url.pathname]) {
@@ -122,6 +135,15 @@ function start({ port, token, baseDir, onClientChange, onControl }) {
     wss.handleUpgrade(req, socket, head, (ws) => {
       clients.add(ws);
       ws.send(JSON.stringify({ type: 'format', ...format }));
+      ws.on('message', (data, isBinary) => {
+        if (isBinary) return;
+        try {
+          const msg = JSON.parse(data.toString());
+          if (msg.type === 'status') {
+            console.log(`[tv-client ${req.socket.remoteAddress}] ${JSON.stringify(msg)}`);
+          }
+        } catch {}
+      });
       ws.on('close', () => {
         clients.delete(ws);
         if (onClientChange) onClientChange(clients.size);

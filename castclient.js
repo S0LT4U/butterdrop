@@ -175,6 +175,19 @@ class CastSession extends EventEmitter {
 
   async launch(url) {
     await this.connect();
+    // DashCast navigates away from its receiver page (force mode), losing its
+    // message listener — a LAUNCH that joins an existing session can't be
+    // given a URL. Always stop any previous session and start fresh.
+    try {
+      const current = await this.request('receiver-0', NS_RECEIVER, { type: 'GET_STATUS' });
+      const running = ((current.status && current.status.applications) || []).find(
+        (a) => a.appId === DASHCAST_APP
+      );
+      if (running) {
+        await this.request('receiver-0', NS_RECEIVER, { type: 'STOP', sessionId: running.sessionId });
+        await new Promise((r) => setTimeout(r, 1500));
+      }
+    } catch {}
     const status = await this.request('receiver-0', NS_RECEIVER, { type: 'LAUNCH', appId: DASHCAST_APP });
     if (payloadError(status)) throw new Error(`Launch failed: ${status.type} ${status.reason || ''}`);
     const app = ((status.status && status.status.applications) || []).find((a) => a.appId === DASHCAST_APP);

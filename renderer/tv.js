@@ -39,6 +39,15 @@ let presets = {};
 let presetKeys = [];
 let presetIndex = 0;
 
+// Report problems to the PC so they show up in its logs (TVs have no console).
+function report(text) {
+  try {
+    fetch(`/clienterr?t=${token}`, { method: 'POST', body: text }).catch(() => {});
+  } catch {}
+}
+
+window.onerror = (msg, src, line) => report(`window.onerror: ${msg} @ ${src}:${line}`);
+
 function showToast(text, ms = 3000) {
   toast.textContent = text;
   toast.classList.add('visible');
@@ -160,6 +169,18 @@ function start() {
   if (started) return;
   started = true;
   statusEl.classList.add('hidden');
+  try {
+    startInner();
+    report(`started ok: ua=${navigator.userAgent.slice(0, 120)}`);
+  } catch (err) {
+    report(`start failed: ${err.message} | ${err.stack ? err.stack.slice(0, 300) : ''}`);
+    statusEl.classList.remove('hidden');
+    statusText.textContent = `Start failed: ${err.message}`;
+    started = false;
+  }
+}
+
+function startInner() {
 
   audioCtx = new (window.AudioContext || window.webkitAudioContext)();
   audioCtx.resume();
@@ -208,6 +229,26 @@ function start() {
 
   initRing();
   connect();
+
+  // Some TV web views start the audio engine suspended (autoplay policy),
+  // which silences playback and freezes analysis. Keep nudging it, and
+  // report state to the server so problems are visible in the PC logs.
+  setInterval(() => {
+    if (audioCtx.state !== 'running') {
+      audioCtx.resume().catch(() => {});
+    }
+    if (ws && ws.readyState === 1) {
+      ws.send(
+        JSON.stringify({
+          type: 'status',
+          ctx: audioCtx.state,
+          buffered: Math.round(buffered),
+          soundOn,
+          sampleRate: audioCtx.sampleRate,
+        })
+      );
+    }
+  }, 5000);
 
   (function render() {
     requestAnimationFrame(render);

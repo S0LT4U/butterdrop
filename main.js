@@ -132,7 +132,8 @@ async function castTo(device) {
       }
     });
     session.on('error', (err) => console.error(`Cast error: ${err.message}`));
-    await session.launch(`${tvUrl()}&autostart=1`);
+    // Cache-buster: force the receiver to load fresh page + scripts.
+    await session.launch(`${tvUrl()}&autostart=1&r=${Date.now()}`);
     castSession = session;
     castTargetName = device.name;
     console.log(`Casting to ${device.name} (${device.host})`);
