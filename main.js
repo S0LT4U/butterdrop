@@ -25,6 +25,7 @@ const DEFAULT_CONFIG = {
   presetBlendSeconds: 2.7,
   tvMode: false,
   tvPort: 8720,
+  castDevices: [],
 };
 
 function loadConfig() {
@@ -106,9 +107,31 @@ function startTvMode() {
   console.log(`TV Mode on: ${tvUrl()}`);
 }
 
-async function refreshCastDevices() {
-  castDevices = await cast.discover(3500);
+async function refreshCastDevices(notify = false) {
+  const found = await cast.discover(3500);
+  // SSDP can be flaky (TV standby states, multicast quirks) — also probe
+  // devices we've successfully found before.
+  for (const known of config.castDevices || []) {
+    if (!found.some((d) => d.host === known.host)) {
+      const name = await cast.probe(known.host);
+      if (name) found.push({ name, host: known.host });
+    }
+  }
+  castDevices = found;
+  if (castDevices.length) {
+    config.castDevices = castDevices;
+    saveConfig();
+  }
   console.log(`Cast devices found: ${castDevices.map((d) => d.name).join(', ') || 'none'}`);
+  if (notify && tray) {
+    tray.displayBalloon({
+      title: 'Butterdrop',
+      content: castDevices.length
+        ? `Found: ${castDevices.map((d) => d.name).join(', ')}`
+        : 'No cast devices found on the network',
+      iconType: 'info',
+    });
+  }
   refreshTrayMenu();
 }
 
@@ -317,7 +340,7 @@ function refreshTrayMenu() {
         ...(castDevices.length ? [{ type: 'separator' }] : []),
         {
           label: castDevices.length ? 'Refresh Devices' : 'Search for Devices',
-          click: () => refreshCastDevices(),
+          click: () => refreshCastDevices(true),
         },
       ],
     },

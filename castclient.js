@@ -4,6 +4,7 @@
 const tls = require('tls');
 const http = require('http');
 const dgram = require('dgram');
+const os = require('os');
 const { EventEmitter } = require('events');
 
 const DASHCAST_APP = '84912283';
@@ -244,7 +245,7 @@ function fetchDeviceName(ip) {
 function discover(timeoutMs = 3500) {
   return new Promise((resolve) => {
     const ips = new Set();
-    const socket = dgram.createSocket({ type: 'udp4', reuseAddr: true });
+    const sockets = [];
     const msearch = Buffer.from(
       'M-SEARCH * HTTP/1.1\r\n' +
         'HOST: 239.255.255.250:1900\r\n' +
@@ -252,18 +253,44 @@ function discover(timeoutMs = 3500) {
         'MX: 2\r\n' +
         'ST: urn:dial-multiscreen-org:service:dial:1\r\n\r\n'
     );
-    socket.on('message', (msg, rinfo) => {
-      if (/dial-multiscreen-org/i.test(msg.toString())) ips.add(rinfo.address);
-    });
-    socket.on('error', () => resolve([]));
-    socket.bind(0, () => {
-      socket.send(msearch, 1900, '239.255.255.250');
-      setTimeout(() => socket.send(msearch, 1900, '239.255.255.250'), 1200);
-    });
-    setTimeout(async () => {
+
+    // Multi-homed machines (WSL/Hyper-V virtual switches) may route the
+    // multicast out the wrong adapter — search from every real interface.
+    const addrs = [];
+    for (const list of Object.values(os.networkInterfaces())) {
+      for (const a of list || []) {
+        if (a.family === 'IPv4' && !a.internal && !a.address.startsWith('169.254.')) {
+          addrs.push(a.address);
+        }
+      }
+    }
+    if (addrs.length === 0) addrs.push('0.0.0.0');
+
+    for (const addr of addrs) {
       try {
-        socket.close();
+        const socket = dgram.createSocket({ type: 'udp4', reuseAddr: true });
+        socket.on('message', (msg, rinfo) => {
+          if (/dial-multiscreen-org/i.test(msg.toString())) ips.add(rinfo.address);
+        });
+        socket.on('error', () => {});
+        socket.bind(0, addr, () => {
+          socket.send(msearch, 1900, '239.255.255.250');
+          setTimeout(() => {
+            try {
+              socket.send(msearch, 1900, '239.255.255.250');
+            } catch {}
+          }, 1200);
+        });
+        sockets.push(socket);
       } catch {}
+    }
+
+    setTimeout(async () => {
+      for (const socket of sockets) {
+        try {
+          socket.close();
+        } catch {}
+      }
       const devices = [];
       for (const ip of ips) {
         const name = await fetchDeviceName(ip);
@@ -274,4 +301,10 @@ function discover(timeoutMs = 3500) {
   });
 }
 
-module.exports = { CastSession, discover };
+// Check whether a previously known device is still there (answers on the
+// Cast web-server port with its device description).
+function probe(ip) {
+  return fetchDeviceName(ip);
+}
+
+module.exports = { CastSession, discover, probe };
