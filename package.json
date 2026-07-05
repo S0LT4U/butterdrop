@@ -3,6 +3,11 @@
   "version": "0.1.0",
   "description": "System-tray Milkdrop-style music visualizer. Global hotkey toggles a fullscreen Butterchurn visualization of whatever audio Windows is playing.",
   "main": "main.js",
+  "author": "S0LT4U",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/S0LT4U/butterdrop.git"
+  },
   "scripts": {
     "start": "electron ."
   },

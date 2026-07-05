@@ -3,6 +3,8 @@
 Instant fullscreen Milkdrop-style music visualizer for whatever Windows is
 playing — with one-click casting to smart TVs.
 
+![Butterdrop rendering a MilkDrop preset](assets/screenshot.jpg)
+
 Butterdrop sits in the system tray. One global hotkey toggles a fullscreen
 [Butterchurn](https://github.com/jberg/butterchurn) (WebGL MilkDrop 2)
 visualization driven by system audio via WASAPI loopback. Flip on TV Mode and
@@ -188,6 +190,10 @@ Butterdrop is glue around other people's brilliant work:
   shortcuts, and the WASAPI loopback capture.
 - **[ws](https://github.com/websockets/ws)** — the WebSocket server that
   carries audio to the TVs.
+
+Butterdrop was designed and written in a pair-programming session with
+**Claude Fable 5** via [Claude Code](https://claude.com/claude-code)
+(Anthropic).
 
 ## License
 
