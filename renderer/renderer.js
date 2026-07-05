@@ -112,10 +112,24 @@ function renderLoop() {
 async function getAudioStream(sourceId) {
   if (sourceId === SYSTEM_SOURCE) {
     // Main process grants this with system-audio loopback — no picker shown.
-    const s = await navigator.mediaDevices.getDisplayMedia({ audio: true, video: true });
+    // Disable mic-style processing: auto gain control audibly pumps the
+    // volume of captured music up and down.
+    const s = await navigator.mediaDevices.getDisplayMedia({
+      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+      video: true,
+    });
     s.getVideoTracks().forEach((t) => t.stop());
     if (s.getAudioTracks().length === 0) {
       throw new Error('No loopback audio track available');
+    }
+    for (const track of s.getAudioTracks()) {
+      try {
+        await track.applyConstraints({
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false,
+        });
+      } catch {}
     }
     return s;
   }
@@ -150,7 +164,10 @@ function setStream(newStream) {
 
 async function ensureAudio() {
   if (!audioCtx) {
-    audioCtx = new AudioContext();
+    // Run the graph at the wire rate: Chromium then resamples the 192 kHz
+    // device capture with its proper resampler instead of our crude
+    // averaging decimator — cleaner top end on the TV stream.
+    audioCtx = new AudioContext({ sampleRate: 48000 });
     await audioCtx.resume();
   }
   if (!stream) {
