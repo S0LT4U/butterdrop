@@ -204,35 +204,53 @@ async function switchSource(sourceId, label) {
 // --- TV Mode audio tap ---
 
 let tapRate = 48000;
+let tapKind = 'none';
 
-function createTap() {
+async function createTap() {
   if (tapNode) return;
   // Hi-res outputs (96/192 kHz) waste bandwidth on the wire; decimate by
   // averaging down to ~48 kHz before sending. Stereo interleaved 16-bit.
   const factor = Math.max(1, Math.round(audioCtx.sampleRate / 48000));
   tapRate = audioCtx.sampleRate / factor;
-  tapNode = audioCtx.createScriptProcessor(4096, 2, 2);
   tapSilence = audioCtx.createGain();
   tapSilence.gain.value = 0;
-  tapNode.connect(tapSilence);
   tapSilence.connect(audioCtx.destination);
-  tapNode.onaudioprocess = (e) => {
-    const inL = e.inputBuffer.getChannelData(0);
-    const inR = e.inputBuffer.numberOfChannels > 1 ? e.inputBuffer.getChannelData(1) : inL;
-    const n = Math.floor(inL.length / factor);
-    const out = new Int16Array(n * 2);
-    for (let o = 0; o < n; o++) {
-      let sumL = 0;
-      let sumR = 0;
-      for (let k = 0; k < factor; k++) {
-        sumL += inL[o * factor + k];
-        sumR += inR[o * factor + k];
+  try {
+    // Preferred: capture on the audio thread, immune to main-thread jank
+    // from the local visualizer (file:// is a secure context, so worklets
+    // work here — unlike the plain-HTTP TV page).
+    await audioCtx.audioWorklet.addModule('tap-worklet.js');
+    tapNode = new AudioWorkletNode(audioCtx, 'butterdrop-tap', {
+      numberOfInputs: 1,
+      numberOfOutputs: 1,
+      outputChannelCount: [1],
+      processorOptions: { factor },
+    });
+    tapNode.port.onmessage = (e) => window.vizAPI.sendAudio(e.data);
+    tapKind = 'worklet';
+  } catch (err) {
+    console.error(`Tap worklet unavailable (${err.message}), using ScriptProcessor`);
+    tapNode = audioCtx.createScriptProcessor(4096, 2, 2);
+    tapNode.onaudioprocess = (e) => {
+      const inL = e.inputBuffer.getChannelData(0);
+      const inR = e.inputBuffer.numberOfChannels > 1 ? e.inputBuffer.getChannelData(1) : inL;
+      const n = Math.floor(inL.length / factor);
+      const out = new Int16Array(n * 2);
+      for (let o = 0; o < n; o++) {
+        let sumL = 0;
+        let sumR = 0;
+        for (let k = 0; k < factor; k++) {
+          sumL += inL[o * factor + k];
+          sumR += inR[o * factor + k];
+        }
+        out[o * 2] = Math.max(-1, Math.min(1, sumL / factor)) * 0x7fff;
+        out[o * 2 + 1] = Math.max(-1, Math.min(1, sumR / factor)) * 0x7fff;
       }
-      out[o * 2] = Math.max(-1, Math.min(1, sumL / factor)) * 0x7fff;
-      out[o * 2 + 1] = Math.max(-1, Math.min(1, sumR / factor)) * 0x7fff;
-    }
-    window.vizAPI.sendAudio(out.buffer);
-  };
+      window.vizAPI.sendAudio(out.buffer);
+    };
+    tapKind = 'script';
+  }
+  tapNode.connect(tapSilence);
   if (sourceNode) sourceNode.connect(tapNode);
 }
 
@@ -251,9 +269,9 @@ async function captureStart() {
   captureWanted = true;
   try {
     await ensureAudio();
-    createTap();
+    await createTap();
     window.vizAPI.sendAudioFormat({ sampleRate: tapRate, channels: 2 });
-    console.log(`TV capture running (device: ${audioCtx.sampleRate} Hz, wire: ${tapRate} Hz)`);
+    console.log(`TV capture running (${tapKind}, device: ${audioCtx.sampleRate} Hz, wire: ${tapRate} Hz)`);
   } catch (err) {
     captureWanted = false;
     console.error(`TV capture failed: ${err.message}`);
