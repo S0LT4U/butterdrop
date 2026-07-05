@@ -57,6 +57,10 @@ function createWindow() {
     },
   });
 
+  // Lock down the renderer: it should never navigate or open windows.
+  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  win.webContents.on('will-navigate', (event) => event.preventDefault());
+
   // Surface renderer logs in the terminal for debugging.
   win.webContents.on('console-message', (event) => {
     console.log(`[renderer] ${event.message}`);

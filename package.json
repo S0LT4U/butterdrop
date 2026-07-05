@@ -12,6 +12,6 @@
     "butterchurn-presets": "^2.4.7"
   },
   "devDependencies": {
-    "electron": "^37.2.0"
+    "electron": "^43.0.0"
   }
 }
