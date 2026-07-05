@@ -8,14 +8,23 @@ const pickerList = document.getElementById('picker-list');
 
 const SYSTEM_SOURCE = 'system';
 
+// Rendering state (active while the window is shown)
 let running = false;
-let stream = null;
-let audioCtx = null;
 let visualizer = null;
-let sourceNode = null;
 let rafId = null;
 let cycleTimer = null;
 let hudTimer = null;
+
+// Audio state (shared by the local visualizer and the TV Mode tap; lives as
+// long as either consumer needs it)
+let audioCtx = null;
+let stream = null;
+let sourceNode = null;
+
+// TV Mode tap
+let captureWanted = false;
+let tapNode = null;
+let tapSilence = null;
 
 let presetKeys = [];
 let presetIndex = 0;
@@ -120,7 +129,12 @@ async function getAudioStream(sourceId) {
   });
 }
 
-function attachStream(newStream) {
+function connectConsumers() {
+  if (visualizer) visualizer.connectAudio(sourceNode);
+  if (tapNode) sourceNode.connect(tapNode);
+}
+
+function setStream(newStream) {
   if (sourceNode) {
     try {
       sourceNode.disconnect();
@@ -131,13 +145,53 @@ function attachStream(newStream) {
   }
   stream = newStream;
   sourceNode = audioCtx.createMediaStreamSource(stream);
-  visualizer.connectAudio(sourceNode);
+  connectConsumers();
+}
+
+async function ensureAudio() {
+  if (!audioCtx) {
+    audioCtx = new AudioContext();
+    await audioCtx.resume();
+  }
+  if (!stream) {
+    let sourceId = savedSource();
+    try {
+      setStream(await getAudioStream(sourceId));
+    } catch (err) {
+      // Saved device may be unplugged — fall back to system loopback.
+      if (sourceId !== SYSTEM_SOURCE) {
+        console.error(`Saved source unavailable (${err.message}), falling back to system audio`);
+        localStorage.setItem('audioSource', SYSTEM_SOURCE);
+        setStream(await getAudioStream(SYSTEM_SOURCE));
+      } else {
+        throw err;
+      }
+    }
+  }
+}
+
+function teardownAudio() {
+  destroyTap();
+  if (sourceNode) {
+    try {
+      sourceNode.disconnect();
+    } catch {}
+    sourceNode = null;
+  }
+  if (stream) {
+    stream.getTracks().forEach((t) => t.stop());
+    stream = null;
+  }
+  if (audioCtx) {
+    audioCtx.close();
+    audioCtx = null;
+  }
 }
 
 async function switchSource(sourceId, label) {
   try {
     const newStream = await getAudioStream(sourceId);
-    attachStream(newStream);
+    setStream(newStream);
     localStorage.setItem('audioSource', sourceId);
     showHud(`Source: ${label}`);
     console.log(`Audio source switched: ${label}`);
@@ -145,6 +199,67 @@ async function switchSource(sourceId, label) {
     console.error(`Failed to switch source: ${err.message}`);
     showHud(`Couldn't use that source: ${err.message}`, 5000);
   }
+}
+
+// --- TV Mode audio tap ---
+
+let tapRate = 48000;
+
+function createTap() {
+  if (tapNode) return;
+  // Hi-res outputs (96/192 kHz) waste bandwidth on the wire; decimate by
+  // averaging down to ~48 kHz before sending.
+  const factor = Math.max(1, Math.round(audioCtx.sampleRate / 48000));
+  tapRate = audioCtx.sampleRate / factor;
+  tapNode = audioCtx.createScriptProcessor(4096, 1, 1);
+  tapSilence = audioCtx.createGain();
+  tapSilence.gain.value = 0;
+  tapNode.connect(tapSilence);
+  tapSilence.connect(audioCtx.destination);
+  tapNode.onaudioprocess = (e) => {
+    const input = e.inputBuffer.getChannelData(0);
+    const n = Math.floor(input.length / factor);
+    const out = new Int16Array(n);
+    for (let o = 0; o < n; o++) {
+      let sum = 0;
+      for (let k = 0; k < factor; k++) sum += input[o * factor + k];
+      const s = Math.max(-1, Math.min(1, sum / factor));
+      out[o] = s * 0x7fff;
+    }
+    window.vizAPI.sendAudio(out.buffer);
+  };
+  if (sourceNode) sourceNode.connect(tapNode);
+}
+
+function destroyTap() {
+  if (!tapNode) return;
+  tapNode.onaudioprocess = null;
+  try {
+    tapNode.disconnect();
+    tapSilence.disconnect();
+  } catch {}
+  tapNode = null;
+  tapSilence = null;
+}
+
+async function captureStart() {
+  captureWanted = true;
+  try {
+    await ensureAudio();
+    createTap();
+    window.vizAPI.sendAudioFormat(tapRate);
+    console.log(`TV capture running (device: ${audioCtx.sampleRate} Hz, wire: ${tapRate} Hz)`);
+  } catch (err) {
+    captureWanted = false;
+    console.error(`TV capture failed: ${err.message}`);
+  }
+}
+
+function captureStop() {
+  captureWanted = false;
+  destroyTap();
+  if (!running) teardownAudio();
+  console.log('TV capture stopped');
 }
 
 // --- Source picker overlay ---
@@ -223,8 +338,7 @@ async function start(options) {
   blendSeconds = (options && options.presetBlendSeconds) || 2.7;
 
   try {
-    audioCtx = new AudioContext();
-    await audioCtx.resume();
+    await ensureAudio();
 
     sizeCanvas();
     visualizer = bc.createVisualizer(audioCtx, canvas, {
@@ -232,21 +346,7 @@ async function start(options) {
       height: canvas.height,
       pixelRatio: window.devicePixelRatio || 1,
     });
-
-    let sourceId = savedSource();
-    try {
-      attachStream(await getAudioStream(sourceId));
-    } catch (err) {
-      // Saved device may be unplugged — fall back to system loopback.
-      if (sourceId !== SYSTEM_SOURCE) {
-        console.error(`Saved source unavailable (${err.message}), falling back to system audio`);
-        sourceId = SYSTEM_SOURCE;
-        localStorage.setItem('audioSource', sourceId);
-        attachStream(await getAudioStream(sourceId));
-      } else {
-        throw err;
-      }
-    }
+    visualizer.connectAudio(sourceNode);
 
     presets = collectPresets();
     presetKeys = shuffle(Object.keys(presets));
@@ -254,7 +354,7 @@ async function start(options) {
     loadPreset(0, 0);
     restartCycle();
     renderLoop();
-    console.log(`Visualizer started (source: ${sourceId === SYSTEM_SOURCE ? 'system loopback' : 'input device'})`);
+    console.log(`Visualizer started (source: ${savedSource() === SYSTEM_SOURCE ? 'system loopback' : 'input device'})`);
 
     if (options && options.showPicker) openPicker();
   } catch (err) {
@@ -270,18 +370,15 @@ function stop() {
   closePicker();
   cancelAnimationFrame(rafId);
   clearInterval(cycleTimer);
-  if (stream) {
-    stream.getTracks().forEach((t) => t.stop());
-    stream = null;
-  }
-  sourceNode = null;
-  if (audioCtx) {
-    audioCtx.close();
-    audioCtx = null;
+  if (visualizer && sourceNode && typeof visualizer.disconnectAudio === 'function') {
+    try {
+      visualizer.disconnectAudio(sourceNode);
+    } catch {}
   }
   visualizer = null;
-  const ctx = canvas.getContext('2d');
-  if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
+  if (!captureWanted) {
+    teardownAudio();
+  }
   console.log('Visualizer stopped');
 }
 
@@ -337,6 +434,8 @@ window.vizAPI.onOpenPicker(() => {
     openPicker();
   }
 });
+window.vizAPI.onCaptureStart(() => captureStart());
+window.vizAPI.onCaptureStop(() => captureStop());
 
 if (!bc) {
   console.error('Butterchurn failed to load');

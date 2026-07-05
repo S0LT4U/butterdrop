@@ -9,15 +9,21 @@ const {
   nativeImage,
   screen,
   ipcMain,
+  clipboard,
 } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
+const crypto = require('crypto');
+const tvServer = require('./tvserver');
 
 const DEFAULT_CONFIG = {
   hotkey: 'Control+Alt+V',
   pickerHotkey: 'Alt+Shift+V',
   presetIntervalSeconds: 30,
   presetBlendSeconds: 2.7,
+  tvMode: false,
+  tvPort: 8720,
 };
 
 function loadConfig() {
@@ -31,9 +37,80 @@ function loadConfig() {
 
 const config = loadConfig();
 
+function saveConfig() {
+  fs.writeFileSync(path.join(__dirname, 'config.json'), JSON.stringify(config, null, 2) + '\n');
+}
+
 let tray = null;
 let win = null;
 let visible = false;
+let tvActive = false;
+let tvClients = 0;
+
+function loadOrCreateToken() {
+  const tokenPath = path.join(app.getPath('userData'), 'tv-token');
+  try {
+    const token = fs.readFileSync(tokenPath, 'utf8').trim();
+    if (token) return token;
+  } catch {}
+  const token = crypto.randomBytes(4).toString('hex');
+  fs.writeFileSync(tokenPath, token);
+  return token;
+}
+
+function lanIp() {
+  // Prefer real LAN adapters over virtual switches (WSL/Hyper-V/VPN) and
+  // skip link-local addresses.
+  const candidates = [];
+  for (const [name, addrs] of Object.entries(os.networkInterfaces())) {
+    for (const addr of addrs || []) {
+      if (addr.family !== 'IPv4' || addr.internal) continue;
+      if (addr.address.startsWith('169.254.')) continue;
+      let score = 0;
+      if (/vethernet|wsl|virtual|loopback|bluetooth|vmware|hyper-v|npcap|vpn/i.test(name)) score -= 10;
+      if (addr.address.startsWith('192.168.')) score += 5;
+      else if (addr.address.startsWith('10.')) score += 4;
+      candidates.push({ address: addr.address, score });
+    }
+  }
+  candidates.sort((a, b) => b.score - a.score);
+  return candidates.length ? candidates[0].address : 'localhost';
+}
+
+function tvUrl() {
+  return `http://${lanIp()}:${config.tvPort}/?t=${loadOrCreateToken()}`;
+}
+
+function startTvMode() {
+  if (tvActive) return;
+  tvServer.start({
+    port: config.tvPort,
+    token: loadOrCreateToken(),
+    baseDir: __dirname,
+    onClientChange: (n) => {
+      tvClients = n;
+      refreshTrayMenu();
+    },
+  });
+  sendWhenLoaded('viz:capture-start');
+  tvActive = true;
+  config.tvMode = true;
+  saveConfig();
+  refreshTrayMenu();
+  console.log(`TV Mode on: ${tvUrl()}`);
+}
+
+function stopTvMode() {
+  if (!tvActive) return;
+  tvServer.stop();
+  if (win) win.webContents.send('viz:capture-stop');
+  tvActive = false;
+  tvClients = 0;
+  config.tvMode = false;
+  saveConfig();
+  refreshTrayMenu();
+  console.log('TV Mode off');
+}
 
 // Audio capture via getDisplayMedia needs no user gesture in our own app.
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
@@ -55,6 +132,8 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      // TV Mode captures audio while the window is hidden.
+      backgroundThrottling: false,
     },
   });
 
@@ -154,6 +233,18 @@ function refreshTrayMenu() {
     },
     { type: 'separator' },
     {
+      label: tvActive ? `TV Mode (${tvClients} connected)` : 'TV Mode (serve to network)',
+      type: 'checkbox',
+      checked: tvActive,
+      click: (item) => (item.checked ? startTvMode() : stopTvMode()),
+    },
+    {
+      label: 'Copy TV URL',
+      enabled: tvActive,
+      click: () => clipboard.writeText(tvUrl()),
+    },
+    { type: 'separator' },
+    {
       label: 'Run at Startup',
       type: 'checkbox',
       checked: app.getLoginItemSettings(loginItemOptions()).openAtLogin,
@@ -197,9 +288,15 @@ app.whenReady().then(() => {
   });
 
   ipcMain.on('viz:hide', () => hideVisualizer());
+  ipcMain.on('viz:audio-format', (event, rate) => tvServer.setFormat(rate));
+  ipcMain.on('viz:audio', (event, buffer) => tvServer.broadcast(buffer));
 
   createWindow();
   createTray();
+
+  if (config.tvMode) {
+    startTvMode();
+  }
 
   const registered = globalShortcut.register(config.hotkey, () => toggleVisualizer());
   if (!registered) {
@@ -234,4 +331,5 @@ app.on('window-all-closed', () => {});
 
 app.on('will-quit', () => {
   globalShortcut.unregisterAll();
+  tvServer.stop();
 });

@@ -2,5 +2,7 @@
   "hotkey": "Control+Alt+V",
   "pickerHotkey": "Alt+Shift+V",
   "presetIntervalSeconds": 30,
-  "presetBlendSeconds": 2.7
+  "presetBlendSeconds": 2.7,
+  "tvMode": true,
+  "tvPort": 8720
 }
