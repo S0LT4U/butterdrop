@@ -3,6 +3,6 @@
   "pickerHotkey": "Alt+Shift+V",
   "presetIntervalSeconds": 30,
   "presetBlendSeconds": 2.7,
-  "tvMode": false,
+  "tvMode": true,
   "tvPort": 8720
 }

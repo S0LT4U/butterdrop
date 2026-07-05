@@ -25,7 +25,6 @@ const DEFAULT_CONFIG = {
   presetBlendSeconds: 2.7,
   tvMode: false,
   tvPort: 8720,
-  castDevices: [],
 };
 
 function loadConfig() {
@@ -107,11 +106,25 @@ function startTvMode() {
   console.log(`TV Mode on: ${tvUrl()}`);
 }
 
+// Known devices live in userData, NOT config.json — config is committed to
+// the repo and must never contain the user's device names or LAN addresses.
+function knownDevicesPath() {
+  return path.join(app.getPath('userData'), 'cast-devices.json');
+}
+
+function loadKnownDevices() {
+  try {
+    return JSON.parse(fs.readFileSync(knownDevicesPath(), 'utf8'));
+  } catch {
+    return [];
+  }
+}
+
 async function refreshCastDevices(notify = false) {
   const found = await cast.discover(3500);
   // SSDP can be flaky (TV standby states, multicast quirks) — also probe
   // devices we've successfully found before.
-  for (const known of config.castDevices || []) {
+  for (const known of loadKnownDevices()) {
     if (!found.some((d) => d.host === known.host)) {
       const name = await cast.probe(known.host);
       if (name) found.push({ name, host: known.host });
@@ -119,8 +132,7 @@ async function refreshCastDevices(notify = false) {
   }
   castDevices = found;
   if (castDevices.length) {
-    config.castDevices = castDevices;
-    saveConfig();
+    fs.writeFileSync(knownDevicesPath(), JSON.stringify(castDevices, null, 2));
   }
   console.log(`Cast devices found: ${castDevices.map((d) => d.name).join(', ') || 'none'}`);
   if (notify && tray) {
