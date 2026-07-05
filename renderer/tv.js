@@ -49,6 +49,27 @@ let primed = false;
 let presets = {};
 let presetKeys = [];
 let presetIndex = 0;
+let presetLoadedAt = 0;
+let lowFpsStreak = 0;
+
+// Presets whose per-frame math this device can't run — skipped permanently.
+function heavyList() {
+  try {
+    return JSON.parse(localStorage.getItem('heavyPresets') || '[]');
+  } catch {
+    return [];
+  }
+}
+
+function markCurrentHeavy() {
+  const name = presetKeys[presetIndex];
+  const list = heavyList();
+  if (!list.includes(name)) {
+    list.push(name);
+    localStorage.setItem('heavyPresets', JSON.stringify(list));
+  }
+  report(`auto-skipped heavy preset: ${name}`);
+}
 
 // Report problems to the PC so they show up in its logs (TVs have no console).
 function report(text) {
@@ -110,6 +131,8 @@ function loadPresetAt(index, blend = 2.7) {
   presetIndex = ((index % presetKeys.length) + presetKeys.length) % presetKeys.length;
   visualizer.loadPreset(presets[presetKeys[presetIndex]], blend);
   showToast(presetKeys[presetIndex]);
+  presetLoadedAt = Date.now();
+  lowFpsStreak = 0;
 }
 
 function nextPreset() {
@@ -288,9 +311,13 @@ async function startInner() {
   }
 
   presets = collectPresets();
-  presetKeys = shuffle(Object.keys(presets));
+  const heavy = heavyList();
+  let usable = Object.keys(presets).filter((k) => !heavy.includes(k));
+  if (usable.length < 20) usable = Object.keys(presets); // blacklist ran wild
+  presetKeys = shuffle(usable);
   presetIndex = 0;
   visualizer.loadPreset(presets[presetKeys[0]], 0);
+  presetLoadedAt = Date.now();
   setInterval(() => nextPreset(), 30000);
 
   connect();
@@ -306,6 +333,22 @@ async function startInner() {
     if (fpsNow > 0 && fpsNow < 18 && canvas.width > 420 && adaptScale > 0.3) {
       adaptScale *= 0.72;
       applySize();
+    } else if (fpsNow >= 25 && adaptScale < 1) {
+      // Light preset again — climb back toward full resolution.
+      adaptScale = Math.min(1, adaptScale / 0.72);
+      applySize();
+    }
+    // CPU-bound presets stay choppy at any resolution: give each preset ~7s
+    // to settle, then two low-fps readings in a row = skip it for good.
+    if (fpsNow > 0 && Date.now() - presetLoadedAt > 7000) {
+      if (fpsNow < 15) {
+        if (++lowFpsStreak >= 2) {
+          markCurrentHeavy();
+          nextPreset();
+        }
+      } else {
+        lowFpsStreak = 0;
+      }
     }
     // Media-path watchdog: only rescue a stalled element. Do NOT chase the
     // live edge — seeks and playbackRate nudges stall this pipeline and made
