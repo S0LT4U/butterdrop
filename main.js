@@ -129,6 +129,13 @@ function toggleVisualizer() {
   }
 }
 
+// In dev mode the executable is electron.exe, which needs the app path as an
+// argument; a packaged build launches directly and needs no args.
+function loginItemOptions() {
+  if (app.isPackaged) return {};
+  return { path: process.execPath, args: [`"${__dirname}"`] };
+}
+
 function refreshTrayMenu() {
   if (!tray) return;
   const menu = Menu.buildFromTemplate([
@@ -149,8 +156,9 @@ function refreshTrayMenu() {
     {
       label: 'Run at Startup',
       type: 'checkbox',
-      checked: app.getLoginItemSettings().openAtLogin,
-      click: (item) => app.setLoginItemSettings({ openAtLogin: item.checked }),
+      checked: app.getLoginItemSettings(loginItemOptions()).openAtLogin,
+      click: (item) =>
+        app.setLoginItemSettings({ ...loginItemOptions(), openAtLogin: item.checked }),
     },
     { type: 'separator' },
     {
