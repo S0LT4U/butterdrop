@@ -196,9 +196,14 @@ class CastSession extends EventEmitter {
     this.sessionId = app.sessionId;
     this.transportId = app.transportId;
     this.send(this.transportId, NS_CONN, { type: 'CONNECT' });
-    // Give the receiver a moment to finish loading before pushing the URL.
-    await new Promise((r) => setTimeout(r, 1000));
-    this.send(this.transportId, NS_DASHCAST, { url, force: true, reload: 0 });
+    // A cold-starting receiver can take several seconds before its message
+    // listener exists, and a message sent too early is silently lost
+    // ("Waiting for address" forever). Re-send until it takes — once
+    // DashCast navigates to the URL, the extra sends go nowhere, harmlessly.
+    for (let i = 0; i < 6; i++) {
+      await new Promise((r) => setTimeout(r, i === 0 ? 800 : 2000));
+      this.send(this.transportId, NS_DASHCAST, { url, force: true, reload: 0 });
+    }
   }
 
   async stop() {
