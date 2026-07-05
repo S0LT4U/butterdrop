@@ -80,8 +80,16 @@ Multiple screens can connect at once; each renders independently.
 
 **Sound:** every screen plays the audio it receives — mute whichever ones
 you don't want (TV remote, M key on the TV page, phone remote, or PC
-volume). The TV copy runs a fraction of a second behind the PC due to
-network buffering, so pick one place to listen.
+volume). TV audio plays through the device's native media pipeline (an
+endless-WAV HTTP stream), which makes it immune to rendering stutter but
+adds a few seconds of startup buffering — each screen's sound and visuals
+are perfectly synced with *each other*, just behind the PC. Pick one place
+to listen.
+
+**Performance:** TVs render at a capped internal resolution (default 1280,
+`?res=` to override) and at most 30 fps, with automatic downscaling if the
+device can't keep up. A few presets are extremely CPU-heavy and will dip on
+TV hardware regardless — skip them with the remote.
 
 Playing music from your phone? Use Spotify Connect (or similar casting) to
 make this PC the playback device — Butterdrop visualizes whatever the PC

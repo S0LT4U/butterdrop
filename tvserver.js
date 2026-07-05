@@ -16,7 +16,27 @@ const LIB_FILES = {
 let server = null;
 let wss = null;
 let clients = new Set();
+let streamClients = new Set();
 let format = { sampleRate: 48000, channels: 2 };
+
+// Endless-WAV header for live HTTP streaming (sizes maxed out).
+function wavHeader({ sampleRate, channels }) {
+  const h = Buffer.alloc(44);
+  h.write('RIFF', 0);
+  h.writeUInt32LE(0xffffffff, 4);
+  h.write('WAVE', 8);
+  h.write('fmt ', 12);
+  h.writeUInt32LE(16, 16);
+  h.writeUInt16LE(1, 20); // PCM
+  h.writeUInt16LE(channels, 22);
+  h.writeUInt32LE(sampleRate, 24);
+  h.writeUInt32LE(sampleRate * channels * 2, 28);
+  h.writeUInt16LE(channels * 2, 32);
+  h.writeUInt16LE(16, 34);
+  h.write('data', 36);
+  h.writeUInt32LE(0xffffffff, 40);
+  return h;
+}
 
 function setFormat(newFormat) {
   format = newFormat;
@@ -24,6 +44,9 @@ function setFormat(newFormat) {
   for (const ws of clients) {
     if (ws.readyState === ws.OPEN) ws.send(msg);
   }
+  // WAV clients carry the format in their header; force a reconnect.
+  for (const res of streamClients) res.end();
+  streamClients.clear();
 }
 
 // Broadcast a control message (nextPreset / prevPreset / sound) to all screens.
@@ -35,11 +58,13 @@ function control(message) {
 }
 
 function broadcast(buffer) {
-  if (clients.size === 0) return;
   for (const ws of clients) {
     if (ws.readyState === ws.OPEN && ws.bufferedAmount < 1_000_000) {
       ws.send(buffer, { binary: true });
     }
+  }
+  for (const res of streamClients) {
+    if (res.writableLength < 1_000_000) res.write(Buffer.from(buffer));
   }
 }
 
@@ -116,6 +141,20 @@ function start({ port, token, baseDir, onClientChange, onControl }) {
       });
     } else if (url.pathname === '/tv.js') {
       serveFile(res, path.join(baseDir, 'renderer', 'tv.js'), 'text/javascript');
+    } else if (url.pathname === '/stream.wav') {
+      if (url.searchParams.get('t') !== token) {
+        res.writeHead(403);
+        res.end('Forbidden');
+        return;
+      }
+      res.writeHead(200, {
+        'Content-Type': 'audio/wav',
+        'Cache-Control': 'no-store',
+        Connection: 'close',
+      });
+      res.write(wavHeader(format));
+      streamClients.add(res);
+      req.on('close', () => streamClients.delete(res));
     } else if (LIB_FILES[url.pathname]) {
       serveFile(res, path.join(baseDir, 'node_modules', ...LIB_FILES[url.pathname]), 'text/javascript');
     } else {
@@ -165,6 +204,8 @@ function start({ port, token, baseDir, onClientChange, onControl }) {
 function stop() {
   for (const ws of clients) ws.terminate();
   clients.clear();
+  for (const res of streamClients) res.end();
+  streamClients.clear();
   if (wss) {
     wss.close();
     wss = null;
