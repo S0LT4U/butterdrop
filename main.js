@@ -91,6 +91,8 @@ function showVisualizer(showPicker = false) {
   win.setFullScreen(true);
   win.show();
   win.focus();
+  // Windows won't always let a hotkey-triggered window take keyboard focus.
+  app.focus({ steal: true });
   sendWhenLoaded('viz:start', {
     presetIntervalSeconds: config.presetIntervalSeconds,
     presetBlendSeconds: config.presetBlendSeconds,
@@ -102,6 +104,8 @@ function showVisualizer(showPicker = false) {
 
 function openSourcePicker() {
   if (visible) {
+    win.focus();
+    app.focus({ steal: true });
     win.webContents.send('viz:open-picker');
   } else {
     showVisualizer(true);
