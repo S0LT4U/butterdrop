@@ -3,7 +3,7 @@
 Instant fullscreen Milkdrop-style music visualizer for whatever Windows is
 playing — with one-click casting to smart TVs.
 
-![Butterdrop rendering a MilkDrop preset](assets/screenshot.jpg)
+![Butterdrop reacting to music, blending between MilkDrop presets](assets/demo.gif)
 
 Butterdrop sits in the system tray. One global hotkey toggles a fullscreen
 [Butterchurn](https://github.com/jberg/butterchurn) (WebGL MilkDrop 2)
