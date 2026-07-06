@@ -41,6 +41,11 @@ npm start
 
 The app starts hidden in the system tray (purple/cyan waveform icon).
 
+> **Don't run Butterdrop as administrator.** Windows blocks screen/audio
+> capture from elevated processes, so the visualizer can't hear your audio
+> (you'll see "Could not start video source"). Launch it from a normal
+> terminal or shortcut. Butterdrop warns you if it detects it's elevated.
+
 ## Controls
 
 | Key | Action |

@@ -10,6 +10,7 @@ const {
   screen,
   ipcMain,
   clipboard,
+  dialog,
 } = require('electron');
 const path = require('path');
 const fs = require('fs');
@@ -428,6 +429,19 @@ app.whenReady().then(() => {
 
   refreshCastDevices();
 
+  // Windows screen capture (which carries the loopback audio) fails from
+  // elevated processes with an opaque "Could not start video source".
+  if (isElevated()) {
+    console.error('Running elevated — audio capture will fail.');
+    dialog.showMessageBox({
+      type: 'warning',
+      title: 'Butterdrop',
+      message: 'Butterdrop is running as administrator.',
+      detail:
+        'Windows blocks screen/audio capture from elevated apps, so the visualizer cannot hear your audio. Quit and start Butterdrop from a normal (non-administrator) terminal or shortcut.',
+    });
+  }
+
   const registered = globalShortcut.register(config.hotkey, () => toggleVisualizer());
   if (!registered) {
     console.error(`Failed to register global hotkey: ${config.hotkey} (already in use?)`);
@@ -463,3 +477,14 @@ app.on('will-quit', () => {
   globalShortcut.unregisterAll();
   tvServer.stop();
 });
+
+function isElevated() {
+  if (process.platform !== 'win32') return false;
+  try {
+    // `net session` succeeds only with administrator rights.
+    require('child_process').execSync('net session', { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+}
