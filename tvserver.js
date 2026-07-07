@@ -17,6 +17,15 @@ let server = null;
 let wss = null;
 let clients = new Set();
 let streamClients = new Set();
+// IP -> last time that device requested anything (page load, stream, etc.).
+let lastSeen = new Map();
+
+// Has the given device fetched from us since `ts`? (Confirms a cast landed.)
+function seenSince(ip, ts) {
+  const norm = (ip || '').replace(/^::ffff:/, '');
+  const t = lastSeen.get(norm);
+  return t !== undefined && t >= ts;
+}
 let format = { sampleRate: 48000, channels: 2 };
 
 // Endless-WAV header for live HTTP streaming (sizes maxed out).
@@ -106,6 +115,9 @@ function start({ port, token, baseDir, onClientChange, onControl }) {
   };
 
   server = http.createServer((req, res) => {
+    // Record that this device reached us — used to confirm a cast landed.
+    const ip = (req.socket.remoteAddress || '').replace(/^::ffff:/, '');
+    if (ip) lastSeen.set(ip, Date.now());
     const url = new URL(req.url, `http://${req.headers.host}`);
     if (url.pathname === '/') {
       if (url.searchParams.get('t') !== token) {
@@ -234,4 +246,4 @@ function stop() {
   }
 }
 
-module.exports = { start, stop, broadcast, setFormat, control, clientCount };
+module.exports = { start, stop, broadcast, setFormat, control, clientCount, seenSince };

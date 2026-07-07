@@ -169,11 +169,17 @@ async function castTo(device) {
       }
     });
     session.on('error', (err) => console.error(`Cast error: ${err.message}`));
-    // Cache-buster: force the receiver to load fresh page + scripts.
-    await session.launch(`${tvUrl()}&autostart=1&r=${Date.now()}`);
+    // Cache-buster forces a fresh load; keep re-sending the URL until the TV
+    // actually reaches our server (handles slow cold-start receivers).
+    const startedAt = Date.now();
+    await session.launch(
+      `${tvUrl()}&autostart=1&r=${startedAt}`,
+      () => tvServer.seenSince(device.host, startedAt)
+    );
     castSession = session;
     castTargetName = device.name;
-    console.log(`Casting to ${device.name} (${device.host})`);
+    const landed = tvServer.seenSince(device.host, startedAt);
+    console.log(`Casting to ${device.name} (${device.host}) — page ${landed ? 'loaded' : 'not confirmed'}`);
   } catch (err) {
     console.error(`Cast to ${device.name} failed: ${err.message}`);
   } finally {

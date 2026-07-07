@@ -174,7 +174,25 @@ class CastSession extends EventEmitter {
     }
   }
 
-  async launch(url) {
+  // Poll receiver status until an app with the given id appears (and has a
+  // transportId — a launching app can show briefly without one).
+  async waitForApp(appId, timeoutMs) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (!this.socket || this.socket.destroyed) return null;
+      try {
+        const status = await this.request('receiver-0', NS_RECEIVER, { type: 'GET_STATUS' });
+        const app = ((status.status && status.status.applications) || []).find(
+          (a) => a.appId === appId && a.transportId
+        );
+        if (app) return app;
+      } catch {}
+      await new Promise((r) => setTimeout(r, 1200));
+    }
+    return null;
+  }
+
+  async launch(url, isLoaded) {
     await this.connect();
     // DashCast navigates away from its receiver page (force mode), losing its
     // message listener — a LAUNCH that joins an existing session can't be
@@ -189,19 +207,25 @@ class CastSession extends EventEmitter {
         await new Promise((r) => setTimeout(r, 1500));
       }
     } catch {}
-    const status = await this.request('receiver-0', NS_RECEIVER, { type: 'LAUNCH', appId: DASHCAST_APP });
-    if (payloadError(status)) throw new Error(`Launch failed: ${status.type} ${status.reason || ''}`);
-    const app = ((status.status && status.status.applications) || []).find((a) => a.appId === DASHCAST_APP);
-    if (!app) throw new Error('DashCast did not appear in receiver status');
+    // Fire LAUNCH and wait for DashCast to actually appear. A cold receiver
+    // downloads the app from the internet first, which can take well over the
+    // normal request timeout — so poll status until it shows up (~30s) rather
+    // than relying on the single LAUNCH reply.
+    this.send('receiver-0', NS_RECEIVER, { type: 'LAUNCH', appId: DASHCAST_APP, requestId: this.requestId++ });
+    const app = await this.waitForApp(DASHCAST_APP, 30000);
+    if (!app) throw new Error('DashCast did not start (timed out)');
     this.sessionId = app.sessionId;
     this.transportId = app.transportId;
     this.send(this.transportId, NS_CONN, { type: 'CONNECT' });
-    // A cold-starting receiver can take several seconds before its message
-    // listener exists, and a message sent too early is silently lost
-    // ("Waiting for address" forever). Re-send until it takes — once
-    // DashCast navigates to the URL, the extra sends go nowhere, harmlessly.
-    for (let i = 0; i < 6; i++) {
-      await new Promise((r) => setTimeout(r, i === 0 ? 800 : 2000));
+    // A cold-starting receiver (loading DashCast from the internet) can take
+    // many seconds before its message listener exists; a URL sent too early
+    // is silently lost ("Waiting for address" forever). Re-send until the
+    // device actually reaches our server (isLoaded), or ~30s elapses. Extra
+    // sends after it has navigated are harmless no-ops.
+    for (let i = 0; i < 20; i++) {
+      await new Promise((r) => setTimeout(r, i === 0 ? 800 : 1500));
+      if (isLoaded && isLoaded()) return;
+      if (!this.socket || this.socket.destroyed) return;
       this.send(this.transportId, NS_DASHCAST, { url, force: true, reload: 0 });
     }
   }
