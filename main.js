@@ -11,6 +11,7 @@ const {
   ipcMain,
   clipboard,
   dialog,
+  shell,
 } = require('electron');
 const path = require('path');
 const fs = require('fs');
@@ -422,6 +423,7 @@ app.whenReady().then(() => {
 
   createWindow();
   createTray();
+  ensureDesktopShortcut();
 
   if (config.tvMode) {
     startTvMode();
@@ -486,5 +488,31 @@ function isElevated() {
     return true;
   } catch {
     return false;
+  }
+}
+
+// Drop a desktop shortcut on first run so the app has a normal (non-elevated,
+// no-terminal) launcher. Guarded by a marker file so we never recreate one
+// the user deleted on purpose.
+function ensureDesktopShortcut() {
+  if (process.platform !== 'win32') return;
+  const marker = path.join(app.getPath('userData'), 'shortcut-created');
+  if (fs.existsSync(marker)) return;
+  try {
+    const shortcut = path.join(app.getPath('desktop'), 'Butterdrop.lnk');
+    const target = app.isPackaged
+      ? { target: process.execPath }
+      : { target: process.execPath, args: `"${__dirname}"` };
+    shell.writeShortcutLink(shortcut, 'create', {
+      ...target,
+      cwd: __dirname,
+      icon: path.join(__dirname, 'assets', 'icon.ico'),
+      iconIndex: 0,
+      description: 'Butterdrop music visualizer',
+    });
+    fs.writeFileSync(marker, new Date().toISOString());
+    console.log('Created desktop shortcut');
+  } catch (err) {
+    console.error(`Could not create desktop shortcut: ${err.message}`);
   }
 }

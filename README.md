@@ -39,7 +39,10 @@ npm install
 npm start
 ```
 
-The app starts hidden in the system tray (purple/cyan waveform icon).
+The app starts hidden in the system tray (purple/cyan waveform icon). On its
+first run it drops a **Butterdrop** shortcut on your desktop, so after that
+you can just double-click to launch (no terminal needed). Delete the shortcut
+and it won't come back.
 
 > **Don't run Butterdrop as administrator.** Windows blocks screen/audio
 > capture from elevated processes, so the visualizer can't hear your audio
