@@ -32,6 +32,17 @@
       color: transparent;
       text-align: center;
     }
+    .section-label {
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: rgba(255, 255, 255, 0.4);
+      margin: 12px 2px 0;
+    }
+    .section-label:first-of-type {
+      margin-top: 0;
+    }
     .row {
       display: flex;
       gap: 14px;
@@ -66,14 +77,30 @@
 <body>
   <div class="wrap">
     <h1>Butterdrop Remote</h1>
+
+    <div class="section-label">Music</div>
     <div class="row">
-      <button data-action="prev">⏮ Prev</button>
-      <button data-action="next" class="accent">Next ⏭</button>
+      <button data-action="media-prev">⏮</button>
+      <button data-action="media-playpause" class="accent">⏯ Play / Pause</button>
+      <button data-action="media-next">⏭</button>
     </div>
     <div class="row">
-      <button data-action="sound-on">🔊 Sound On</button>
-      <button data-action="sound-off">🔇 Sound Off</button>
+      <button data-action="media-voldown">🔉 Vol −</button>
+      <button data-action="media-volup">🔊 Vol +</button>
+      <button data-action="media-mute">🔇 Mute</button>
     </div>
+
+    <div class="section-label">Visualizer</div>
+    <div class="row">
+      <button data-action="prev">⏮ Prev preset</button>
+      <button data-action="next" class="accent">Next preset ⏭</button>
+    </div>
+    <div class="row">
+      <button data-action="sound-on">🔊 TV Sound On</button>
+      <button data-action="sound-off">🔇 TV Sound Off</button>
+    </div>
+
+    <div class="section-label">Cast</div>
     <div class="row">
       <button data-action="cast" class="accent">📺 Cast to TV</button>
       <button data-action="stopcast">⏹ Stop Cast</button>

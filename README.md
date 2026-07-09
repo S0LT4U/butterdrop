@@ -24,8 +24,8 @@ phone.
   renders on its own GPU with stereo audio playback
 - **One-click casting** — discovers Google Cast devices (Chromecast,
   Android TV / Google TV) and pushes the visualizer to them from the tray
-- **Phone remote** — next/prev preset, sound on/off, cast/stop-cast from
-  your phone's browser
+- **Phone remote** — control the music (play/pause, prev/next track, volume,
+  mute), plus preset, TV sound, and cast/stop-cast, from your phone's browser
 - **Tray service** — starts hidden, optional run-at-boot, near-zero idle cost
 
 ## Install & run
@@ -80,9 +80,13 @@ your LAN (default port 8720):
 - **TV page** (`Copy TV URL`, e.g. `http://192.168.1.50:8720/?t=abcd1234`) —
   open it in any browser (smart TV, tablet, another PC), tap/press OK, and
   that device runs the visualizer fullscreen, in sync with the PC's audio.
-- **Phone remote** (`Copy Phone Remote URL`, `/remote?t=…`) — big buttons
-  for prev/next preset, sound on/off, cast, and stop-cast. Bookmark it to
-  your phone's home screen.
+- **Phone remote** (`Copy Phone Remote URL`, `/remote?t=…`) — big buttons in
+  three groups: **Music** (play/pause, prev/next track, volume, mute), which
+  drives whatever's playing via Windows media keys; **Visualizer** (preset
+  prev/next, TV sound on/off); and **Cast** (cast, stop-cast). Bookmark it to
+  your phone's home screen. Note: the media/volume keys act on the PC — volume
+  is the Windows master level (the same one feeding the loopback capture), so
+  turning it down also dims what the visualizer hears and the casted stream.
 
 The audio feed is 48 kHz stereo 16-bit (~190 KB/s per screen — less than a
 Spotify stream). Hi-res outputs (96/192 kHz) are resampled on the wire, and

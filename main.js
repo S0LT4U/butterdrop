@@ -199,6 +199,18 @@ async function stopCasting() {
   refreshTrayMenu();
 }
 
+// Phone-remote media actions -> Windows virtual-key codes. Injecting these
+// reproduces the keyboard media keys: transport keys go to the current media
+// session (Spotify, browser, etc.), volume keys to the system master volume.
+const MEDIA_KEYS = {
+  'media-playpause': 0xb3, // VK_MEDIA_PLAY_PAUSE
+  'media-prev': 0xb1, // VK_MEDIA_PREV_TRACK
+  'media-next': 0xb0, // VK_MEDIA_NEXT_TRACK
+  'media-voldown': 0xae, // VK_VOLUME_DOWN
+  'media-volup': 0xaf, // VK_VOLUME_UP
+  'media-mute': 0xad, // VK_VOLUME_MUTE
+};
+
 function handleRemoteControl(action) {
   if (action === 'next' && win && visible) win.webContents.send('viz:next-preset');
   if (action === 'prev' && win && visible) win.webContents.send('viz:prev-preset');
@@ -207,6 +219,28 @@ function handleRemoteControl(action) {
     if (device) castTo(device);
   }
   if (action === 'stopcast') stopCasting();
+  if (MEDIA_KEYS[action] !== undefined) sendMediaKey(MEDIA_KEYS[action]);
+}
+
+// Inject a media/volume key system-wide via keybd_event (down then up).
+// Dependency-free: shells out to PowerShell, same pattern as isElevated().
+function sendMediaKey(vk) {
+  if (process.platform !== 'win32') return;
+  const ps =
+    `$c=[byte]${vk};` +
+    `Add-Type -Name Md -Namespace Bd -MemberDefinition ` +
+    `'[DllImport("user32.dll")] public static extern void keybd_event(byte k, byte s, uint f, System.UIntPtr e);';` +
+    `[Bd.Md]::keybd_event($c,0,0,[System.UIntPtr]::Zero);` +
+    `[Bd.Md]::keybd_event($c,0,2,[System.UIntPtr]::Zero)`;
+  try {
+    require('child_process').spawn(
+      'powershell.exe',
+      ['-NoProfile', '-NonInteractive', '-Command', ps],
+      { windowsHide: true, stdio: 'ignore' }
+    );
+  } catch (err) {
+    console.error(`Media key ${vk} failed: ${err.message}`);
+  }
 }
 
 function stopTvMode() {
