@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Spike Receiver</title>
+  <style>
+    html, body { margin: 0; background: #000; overflow: hidden; width: 100%; height: 100%; }
+    #v { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000; }
+    #hud {
+      position: absolute; top: 8px; left: 8px; color: #0f0;
+      font: 16px monospace; background: rgba(0,0,0,0.5); padding: 6px 10px;
+      white-space: pre; z-index: 2;
+    }
+  </style>
+</head>
+<body>
+  <video id="v" autoplay playsinline muted></video>
+  <div id="hud">waiting for stream…</div>
+  <script src="/receiver.js"></script>
+</body>
+</html>
