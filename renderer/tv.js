@@ -21,6 +21,12 @@ const autostart = params.get('autostart') === '1';
 // feedback-based visuals upscale beautifully) and let CSS stretch it.
 // Override with ?res=1920 for beefier devices.
 const resCap = parseInt(params.get('res'), 10) || 1280;
+// Preset rotation: loading a preset compiles shaders (a brief thread-blocking
+// freeze on weak TVs) and the blend renders two presets at once. Rotate less
+// often and blend faster than the desktop to soften that hitch. Override with
+// ?cycle= (seconds) and ?blend= (seconds).
+const CYCLE_MS = (parseFloat(params.get('cycle')) || 45) * 1000;
+const BLEND_SEC = parseFloat(params.get('blend')) || 1.5;
 
 let audioCtx = null;
 let visualizer = null;
@@ -128,7 +134,7 @@ function shuffle(arr) {
   return arr;
 }
 
-function loadPresetAt(index, blend = 2.7) {
+function loadPresetAt(index, blend = BLEND_SEC) {
   if (!visualizer || presetKeys.length === 0) return;
   presetIndex = ((index % presetKeys.length) + presetKeys.length) % presetKeys.length;
   visualizer.loadPreset(presets[presetKeys[presetIndex]], blend);
@@ -346,7 +352,7 @@ async function startInner() {
   presetIndex = 0;
   visualizer.loadPreset(presets[presetKeys[0]], 0);
   presetLoadedAt = Date.now();
-  setInterval(() => nextPreset(), 30000);
+  setInterval(() => nextPreset(), CYCLE_MS);
 
   connect();
 
@@ -358,13 +364,19 @@ async function startInner() {
     }
     const fpsNow = Math.round(frames / 5);
     frames = 0;
-    if (fpsNow > 0 && fpsNow < 18 && canvas.width > 420 && adaptScale > 0.3) {
-      adaptScale *= 0.72;
-      applySize();
-    } else if (fpsNow >= 25 && adaptScale < 1) {
-      // Light preset again — climb back toward full resolution.
-      adaptScale = Math.min(1, adaptScale / 0.72);
-      applySize();
+    // Ignore the settle window right after a preset change: the shader-compile
+    // freeze + blend causes a transient fps dip that isn't the preset's steady
+    // cost, and reacting to it caused the resolution to thrash up and down.
+    const settling = Date.now() - presetLoadedAt < 5000;
+    if (!settling) {
+      if (fpsNow > 0 && fpsNow < 18 && canvas.width > 420 && adaptScale > 0.3) {
+        adaptScale *= 0.72;
+        applySize();
+      } else if (fpsNow >= 25 && adaptScale < 1) {
+        // Light preset again — climb back toward full resolution.
+        adaptScale = Math.min(1, adaptScale / 0.72);
+        applySize();
+      }
     }
     // CPU-bound presets stay choppy at any resolution: give each preset ~7s
     // to settle, then two low-fps readings in a row = skip it for good.
