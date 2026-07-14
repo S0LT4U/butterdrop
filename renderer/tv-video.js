@@ -12,7 +12,7 @@ const token = params.get('t') || '';
 // WiFi jitter (trades lag for smoothness). Override with ?buffer= seconds.
 // Moderate buffer: big enough to absorb normal jitter, small enough that the
 // TV's older Chromium doesn't accumulate + drop frames. Override with ?buffer=.
-const BUFFER_SEC = parseFloat(params.get('buffer')) || 2;
+const BUFFER_SEC = parseFloat(params.get('buffer')) || 3;
 
 let pc = null;
 let ws = null;

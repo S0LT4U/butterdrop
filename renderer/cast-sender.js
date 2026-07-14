@@ -14,6 +14,11 @@ const TOKEN = params.get('t') || '';
 // 4 Mbps: gentle on weak TV WiFi while still ~2x the default that pixelated.
 // (Override via ?bitrate= for wired/strong links.)
 const BITRATE = parseInt(params.get('bitrate'), 10) || 4_000_000;
+const FPS = parseInt(params.get('fps'), 10) || 30;
+// Cap the internal render loop: an off-screen window runs rAF at the display's
+// refresh (~120Hz here), but we only capture FPS frames, so rendering higher
+// just wastes GPU. Render at 2x capture for smooth sampling. Override ?renderfps=.
+const RENDER_FPS = parseInt(params.get('renderfps'), 10) || 60;
 
 let audioCtx = null;
 let loopbackStream = null;
@@ -104,11 +109,15 @@ async function start() {
   loadPreset(0, 0);
   restartCycle();
 
-  (function render() {
+  const renderInterval = 1000 / RENDER_FPS;
+  let lastRender = 0;
+  (function render(now) {
     requestAnimationFrame(render);
+    if (now - lastRender < renderInterval - 1) return;
+    lastRender = now;
     visualizer.render();
     rafFrames++;
-  })();
+  })(0);
 
   connectSignaling();
 }
@@ -143,7 +152,7 @@ async function makeOffer() {
   // share ONE MediaStream, or the receiver's ontrack fires twice with
   // different streams and the audio-only one overwrites the video (black
   // screen). One stream also keeps A/V synced.
-  const videoTrack = canvas.captureStream(30).getVideoTracks()[0];
+  const videoTrack = canvas.captureStream(FPS).getVideoTracks()[0];
   videoTrack.contentHint = 'detail';
   const audioTrack = loopbackStream.getAudioTracks()[0];
   const outStream = new MediaStream();
