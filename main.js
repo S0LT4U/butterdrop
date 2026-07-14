@@ -53,6 +53,7 @@ let castDevices = [];
 let castSession = null;
 let castTargetName = '';
 let castBusy = false;
+let castSenderWin = null; // off-screen window rendering + WebRTC-streaming to the TV
 
 function loadOrCreateToken() {
   const tokenPath = path.join(app.getPath('userData'), 'tv-token');
@@ -86,6 +87,11 @@ function lanIp() {
 
 function tvUrl() {
   return `http://${lanIp()}:${config.tvPort}/?t=${loadOrCreateToken()}`;
+}
+
+// Smooth Cast: server-rendered video receiver page.
+function tvVideoUrl() {
+  return `http://${lanIp()}:${config.tvPort}/video?t=${loadOrCreateToken()}`;
 }
 
 function startTvMode() {
@@ -149,6 +155,43 @@ async function refreshCastDevices(notify = false) {
   refreshTrayMenu();
 }
 
+// The Smooth Cast renderer runs in its own window, positioned far off-screen
+// but SHOWN (showInactive) so its requestAnimationFrame render loop stays at
+// full rate — a never-shown window throttles to ~1fps (verified).
+function createCastSender() {
+  destroyCastSender();
+  castSenderWin = new BrowserWindow({
+    show: false,
+    x: -4000,
+    y: -4000,
+    width: 1280,
+    height: 720,
+    skipTaskbar: true,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      backgroundThrottling: false,
+    },
+  });
+  castSenderWin.webContents.on('console-message', (e) => console.log(e.message));
+  castSenderWin.loadFile(path.join(__dirname, 'renderer', 'cast-sender.html'), {
+    query: { port: String(config.tvPort), t: loadOrCreateToken() },
+  });
+  castSenderWin.once('ready-to-show', () => {
+    if (castSenderWin) castSenderWin.showInactive();
+  });
+}
+
+function destroyCastSender() {
+  if (castSenderWin) {
+    try {
+      castSenderWin.destroy();
+    } catch {}
+    castSenderWin = null;
+  }
+}
+
 async function castTo(device) {
   if (castBusy) return;
   castBusy = true;
@@ -173,12 +216,14 @@ async function castTo(device) {
     // actually reaches our server (handles slow cold-start receivers).
     const startedAt = Date.now();
     await session.launch(
-      `${tvUrl()}&autostart=1&r=${startedAt}`,
+      `${tvVideoUrl()}&autostart=1&r=${startedAt}`,
       () => tvServer.seenSince(device.host, startedAt)
     );
     castSession = session;
     castTargetName = device.name;
     const landed = tvServer.seenSince(device.host, startedAt);
+    // Receiver page is up; start the off-screen renderer + WebRTC sender.
+    createCastSender();
     console.log(`Casting to ${device.name} (${device.host}) — page ${landed ? 'loaded' : 'not confirmed'}`);
   } catch (err) {
     console.error(`Cast to ${device.name} failed: ${err.message}`);
@@ -189,6 +234,7 @@ async function castTo(device) {
 }
 
 async function stopCasting() {
+  destroyCastSender();
   if (!castSession) return;
   const session = castSession;
   castSession = null;
@@ -212,8 +258,14 @@ const MEDIA_KEYS = {
 };
 
 function handleRemoteControl(action) {
-  if (action === 'next' && win && visible) win.webContents.send('viz:next-preset');
-  if (action === 'prev' && win && visible) win.webContents.send('viz:prev-preset');
+  if (action === 'next') {
+    if (win && visible) win.webContents.send('viz:next-preset');
+    if (castSenderWin) castSenderWin.webContents.send('viz:next-preset');
+  }
+  if (action === 'prev') {
+    if (win && visible) win.webContents.send('viz:prev-preset');
+    if (castSenderWin) castSenderWin.webContents.send('viz:prev-preset');
+  }
   if (action === 'cast') {
     const device = castDevices.find((d) => d.name === castTargetName) || castDevices[0];
     if (device) castTo(device);
@@ -367,9 +419,10 @@ function refreshTrayMenu() {
     },
     {
       label: 'Next Preset',
-      enabled: visible || (tvActive && tvClients > 0),
+      enabled: visible || !!castSenderWin || (tvActive && tvClients > 0),
       click: () => {
         if (win && visible) win.webContents.send('viz:next-preset');
+        if (castSenderWin) castSenderWin.webContents.send('viz:next-preset');
         if (tvActive) tvServer.control({ type: 'nextPreset' });
       },
     },

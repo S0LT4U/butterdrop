@@ -15,6 +15,8 @@ const LIB_FILES = {
 
 let server = null;
 let wss = null;
+let rtcWss = null;
+let rtcPeers = {}; // role -> ws, for WebRTC signaling relay (Smooth Cast)
 let clients = new Set();
 let streamClients = new Set();
 // IP -> last time that device requested anything (page load, stream, etc.).
@@ -126,6 +128,16 @@ function start({ port, token, baseDir, onClientChange, onControl }) {
         return;
       }
       serveFile(res, path.join(baseDir, 'renderer', 'tv.html'), 'text/html');
+    } else if (url.pathname === '/video') {
+      // Smooth Cast receiver page (server-rendered video over WebRTC).
+      if (url.searchParams.get('t') !== token) {
+        res.writeHead(403);
+        res.end('Forbidden: missing or bad token');
+        return;
+      }
+      serveFile(res, path.join(baseDir, 'renderer', 'tv-video.html'), 'text/html');
+    } else if (url.pathname === '/tv-video.js') {
+      serveFile(res, path.join(baseDir, 'renderer', 'tv-video.js'), 'text/javascript');
     } else if (url.pathname === '/remote') {
       if (url.searchParams.get('t') !== token) {
         res.writeHead(403);
@@ -194,10 +206,42 @@ function start({ port, token, baseDir, onClientChange, onControl }) {
   });
 
   wss = new WebSocketServer({ noServer: true });
+  rtcWss = new WebSocketServer({ noServer: true });
 
   server.on('upgrade', (req, socket, head) => {
     const url = new URL(req.url, `http://${req.headers.host}`);
-    if (url.pathname !== '/audio' || url.searchParams.get('t') !== token) {
+    if (url.searchParams.get('t') !== token) {
+      socket.destroy();
+      return;
+    }
+    // Smooth Cast signaling relay: pair one 'sender' (PC renderer) and one
+    // 'receiver' (TV) by role, relay SDP/ICE between them.
+    if (url.pathname === '/rtc') {
+      const role = url.searchParams.get('role');
+      if (role !== 'sender' && role !== 'receiver') {
+        socket.destroy();
+        return;
+      }
+      rtcWss.handleUpgrade(req, socket, head, (ws) => {
+        rtcPeers[role] = ws;
+        ws._role = role;
+        console.log(`[rtc] ${role} connected`);
+        if (rtcPeers.sender && rtcPeers.receiver) {
+          rtcPeers.sender.send(JSON.stringify({ type: 'begin' }));
+        }
+        ws.on('message', (raw) => {
+          const other = role === 'sender' ? rtcPeers.receiver : rtcPeers.sender;
+          if (other && other.readyState === other.OPEN) other.send(raw.toString());
+        });
+        ws.on('close', () => {
+          if (rtcPeers[role] === ws) delete rtcPeers[role];
+          console.log(`[rtc] ${role} disconnected`);
+        });
+        ws.on('error', () => {});
+      });
+      return;
+    }
+    if (url.pathname !== '/audio') {
       socket.destroy();
       return;
     }
@@ -236,9 +280,19 @@ function stop() {
   clients.clear();
   for (const res of streamClients) res.end();
   streamClients.clear();
+  for (const role of Object.keys(rtcPeers)) {
+    try {
+      rtcPeers[role].terminate();
+    } catch {}
+  }
+  rtcPeers = {};
   if (wss) {
     wss.close();
     wss = null;
+  }
+  if (rtcWss) {
+    rtcWss.close();
+    rtcWss = null;
   }
   if (server) {
     server.close();

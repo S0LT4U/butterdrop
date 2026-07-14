@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8" /><title>raf test</title></head>
+<body>
+<canvas id="c" width="1280" height="720"></canvas>
+<script src="../node_modules/butterchurn/lib/butterchurn.min.js"></script>
+<script src="../node_modules/butterchurn-presets/lib/butterchurnPresets.min.js"></script>
+<script>
+'use strict';
+const bc = window.butterchurn && (window.butterchurn.default || window.butterchurn);
+const presetsMod = window.butterchurnPresets && (window.butterchurnPresets.default || window.butterchurnPresets);
+const canvas = document.getElementById('c');
+let frames = 0;
+
+function start() {
+  const ac = new AudioContext();
+  const osc = ac.createOscillator();
+  osc.type = 'sawtooth';
+  osc.frequency.value = 100;
+  osc.start();
+  const viz = bc.createVisualizer(ac, canvas, { width: 1280, height: 720, pixelRatio: 1 });
+  const g = ac.createGain();
+  osc.connect(g);
+  viz.connectAudio(g);
+  const presets = presetsMod.getPresets ? presetsMod.getPresets() : presetsMod;
+  const keys = Object.keys(presets);
+  viz.loadPreset(presets[keys[0]], 0);
+  (function loop() {
+    requestAnimationFrame(loop);
+    viz.render();
+    frames++;
+  })();
+  setInterval(() => {
+    console.log('FPS ' + (frames / 2).toFixed(0) + ' hidden=' + document.hidden + ' visState=' + document.visibilityState);
+    frames = 0;
+  }, 2000);
+}
+
+if (!bc) { console.log('FPS-ERROR butterchurn failed to load'); }
+else { start(); }
+</script>
+</body>
+</html>
