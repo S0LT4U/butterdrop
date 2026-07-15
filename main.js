@@ -99,6 +99,7 @@ function startTvMode() {
       refreshTrayMenu();
     },
     onControl: (action) => handleRemoteControl(action),
+    getVolume: readMasterVolume,
   });
   sendWhenLoaded('viz:capture-start');
   tvActive = true;
@@ -212,6 +213,10 @@ const MEDIA_KEYS = {
 };
 
 function handleRemoteControl(action) {
+  if (action.indexOf('vol-set:') === 0) {
+    setMasterVolume(parseFloat(action.slice(8)));
+    return;
+  }
   if (action === 'next' && win && visible) win.webContents.send('viz:next-preset');
   if (action === 'prev' && win && visible) win.webContents.send('viz:prev-preset');
   if (action === 'cast') {
@@ -220,6 +225,67 @@ function handleRemoteControl(action) {
   }
   if (action === 'stopcast') stopCasting();
   if (MEDIA_KEYS[action] !== undefined) sendMediaKey(MEDIA_KEYS[action]);
+}
+
+// Absolute Windows master volume via Core Audio (IAudioEndpointVolume). The
+// media keys are relative ±notches, so a percentage slider needs a real set.
+// Written to a temp .ps1 and run with -File to dodge -Command quoting issues.
+function volumeScriptPath() {
+  const p = path.join(app.getPath('userData'), 'volume.ps1');
+  if (!fs.existsSync(p)) {
+    fs.writeFileSync(
+      p,
+      `param([string]$mode,[double]$pct)
+Add-Type -TypeDefinition @'
+using System;using System.Runtime.InteropServices;
+[Guid("5CDF2C82-841E-4546-9722-0CF74078229A"),InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]interface IAEV{int f();int g();int h();int i();int SetMasterVolumeLevelScalar(float l,Guid c);int j();int GetMasterVolumeLevelScalar(out float l);}
+[Guid("D666063F-1587-4E43-81F1-B948E807363F"),InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]interface IMMD{int Activate(ref Guid id,int c,IntPtr p,[MarshalAs(UnmanagedType.IUnknown)]out object o);}
+[Guid("A95664D2-9614-4F35-A746-DE8DB63617E6"),InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]interface IMMDE{int f();int GetDefaultAudioEndpoint(int d,int r,out IMMD e);}
+[ComImport,Guid("BCDE0395-E52F-467C-8E3D-C4579291692E")]class MMDE{}
+public class Vol{static IAEV EP(){var e=(IMMDE)(new MMDE());IMMD d;e.GetDefaultAudioEndpoint(0,1,out d);Guid i=typeof(IAEV).GUID;object o;d.Activate(ref i,1,IntPtr.Zero,out o);return (IAEV)o;}
+public static void Set(float p){EP().SetMasterVolumeLevelScalar(p,Guid.Empty);}
+public static float Get(){float l;EP().GetMasterVolumeLevelScalar(out l);return l;}}
+'@
+if($mode -eq 'set'){[Vol]::Set([float]([Math]::Max(0,[Math]::Min(100,$pct))/100))}else{[Math]::Round([Vol]::Get()*100)}
+`
+    );
+  }
+  return p;
+}
+
+function setMasterVolume(pct) {
+  if (process.platform !== 'win32' || isNaN(pct)) return;
+  try {
+    require('child_process').spawn(
+      'powershell.exe',
+      ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', volumeScriptPath(), 'set', String(pct)],
+      { windowsHide: true, stdio: 'ignore' }
+    );
+  } catch (err) {
+    console.error(`Set volume failed: ${err.message}`);
+  }
+}
+
+function readMasterVolume() {
+  return new Promise((resolve) => {
+    if (process.platform !== 'win32') return resolve(null);
+    try {
+      const p = require('child_process').spawn(
+        'powershell.exe',
+        ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', volumeScriptPath(), 'get'],
+        { windowsHide: true }
+      );
+      let out = '';
+      p.stdout.on('data', (d) => (out += d));
+      p.on('close', () => {
+        const n = parseInt(out.trim(), 10);
+        resolve(isNaN(n) ? null : n);
+      });
+      p.on('error', () => resolve(null));
+    } catch {
+      resolve(null);
+    }
+  });
 }
 
 // Inject a media/volume key system-wide via keybd_event (down then up).

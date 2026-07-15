@@ -99,7 +99,7 @@ function clientCount() {
   return clients.size;
 }
 
-function start({ port, token, baseDir, onClientChange, onControl }) {
+function start({ port, token, baseDir, onClientChange, onControl, getVolume }) {
   if (server) return;
 
   const serveFile = (res, filePath, type) => {
@@ -155,6 +155,16 @@ function start({ port, token, baseDir, onClientChange, onControl }) {
           res.writeHead(400);
           res.end('Bad request');
         }
+      });
+    } else if (url.pathname === '/volume' && req.method === 'GET') {
+      if (url.searchParams.get('t') !== token) {
+        res.writeHead(403);
+        res.end('Forbidden');
+        return;
+      }
+      Promise.resolve(getVolume ? getVolume() : null).then((v) => {
+        res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+        res.end(JSON.stringify({ volume: v }));
       });
     } else if (url.pathname === '/clienterr' && req.method === 'POST') {
       if (url.searchParams.get('t') !== token) {
