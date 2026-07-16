@@ -94,6 +94,8 @@ your LAN (default port 8720):
 
 <p align="center">
   <img src="assets/remote-glow.png" alt="Phone remote — Butterdrop glow skin" width="300" />
+  &nbsp;&nbsp;
+  <img src="assets/remote-gray.png" alt="Phone remote — classic Winamp gray skin" width="300" />
 </p>
 
 The audio feed is 48 kHz stereo 16-bit (~190 KB/s per screen — less than a
