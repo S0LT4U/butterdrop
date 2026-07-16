@@ -24,8 +24,10 @@ phone.
   renders on its own GPU with stereo audio playback
 - **One-click casting** — discovers Google Cast devices (Chromecast,
   Android TV / Google TV) and pushes the visualizer to them from the tray
-- **Phone remote** — control the music (play/pause, prev/next track, volume,
-  mute), plus preset, TV sound, and cast/stop-cast, from your phone's browser
+- **Phone remote** — a **Winamp-skinned** control page: play/pause, prev/next
+  track, a real percentage volume slider, mute, presets, TV sound, and
+  cast/stop-cast — with a GRAY/GLOW skin toggle (classic Winamp or Butterdrop
+  glow), from your phone's browser
 - **Tray service** — starts hidden, optional run-at-boot, near-zero idle cost
 
 ## Install & run
@@ -80,13 +82,21 @@ your LAN (default port 8720):
 - **TV page** (`Copy TV URL`, e.g. `http://192.168.1.50:8720/?t=abcd1234`) —
   open it in any browser (smart TV, tablet, another PC), tap/press OK, and
   that device runs the visualizer fullscreen, in sync with the PC's audio.
-- **Phone remote** (`Copy Phone Remote URL`, `/remote?t=…`) — big buttons in
-  three groups: **Music** (play/pause, prev/next track, volume, mute), which
-  drives whatever's playing via Windows media keys; **Visualizer** (preset
-  prev/next, TV sound on/off); and **Cast** (cast, stop-cast). Bookmark it to
-  your phone's home screen. Note: the media/volume keys act on the PC — volume
-  is the Windows master level (the same one feeding the loopback capture), so
-  turning it down also dims what the visualizer hears and the casted stream.
+- **Phone remote** (`Copy Phone Remote URL`, `/remote?t=…`) — a Winamp-styled
+  control page with **Music** (play/pause, prev/next track, a real percentage
+  volume slider, mute), **Preset** (prev/next), **TV Sound** (on/off) and
+  **Cast** (cast, stop-cast). Bookmark it to your phone's home screen, and flip
+  the **GRAY ⇄ GLOW** switch in the titlebar between the classic Winamp gray/green
+  skin and the Butterdrop purple/cyan one (remembered across visits). Transport
+  keys drive whatever's playing on the PC (Spotify, browser, most players); the
+  volume slider sets the Windows master level exactly (which also feeds the
+  loopback capture, so it affects the visualizer and casted stream).
+
+<p align="center">
+  <img src="assets/remote-glow.png" alt="Phone remote — Butterdrop glow skin" width="300" />
+  &nbsp;&nbsp;
+  <img src="assets/remote-gray.png" alt="Phone remote — classic Winamp gray skin" width="300" />
+</p>
 
 The audio feed is 48 kHz stereo 16-bit (~190 KB/s per screen — less than a
 Spotify stream). Hi-res outputs (96/192 kHz) are resampled on the wire, and

@@ -24,6 +24,7 @@
       --text: #d4cee6;
       --text-dim: #8b849e;
       --label: #b9b2cf;
+      --btn-grad: linear-gradient(180deg, #2c2740, #211d30);
       --bevel-up: inset 1.5px 1.5px 0 var(--chassis-hi), inset -1.5px -1.5px 0 var(--chassis-lo);
       --bevel-down: inset 1.5px 1.5px 0 var(--chassis-lo), inset -1.5px -1.5px 0 var(--chassis-hi);
       --bevel-screen: inset 2px 2px 3px #000, inset -1px -1px 0 var(--screen-edge);
@@ -50,6 +51,7 @@
       --text: #d2d2da;
       --text-dim: #86868f;
       --label: #b2b2bc;
+      --btn-grad: linear-gradient(180deg, #45454f, #34343c);
       --titlebar-grad: linear-gradient(90deg, #26262f 0%, #3c3c4c 30%, #2c2c36 70%, #1e1e26 100%);
     }
 
@@ -237,7 +239,7 @@
     .btn {
       font-family: var(--sans);
       color: var(--text);
-      background: linear-gradient(180deg, #2c2740, #211d30);
+      background: var(--btn-grad);
       box-shadow: var(--bevel-up);
       border: none; border-radius: 4px; cursor: pointer;
       display: flex; align-items: center; justify-content: center; gap: 6px;
